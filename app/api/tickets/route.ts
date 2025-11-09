@@ -4,13 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 export async function POST(req: NextRequest) {
   try {
     const { counterSlug } = await req.json();
-    if (!counterSlug) {
-      return NextResponse.json({ error: "counterSlug mancante" }, { status: 400 });
-    }
+    if (!counterSlug) return NextResponse.json({ error: "counterSlug mancante" }, { status: 400 });
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY! // SERVICE KEY solo lato server
+      process.env.SUPABASE_SERVICE_KEY!
     );
 
     const { data, error } = await supabase.rpc("create_ticket", { p_counter_slug: counterSlug });
@@ -21,4 +19,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
-

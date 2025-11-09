@@ -1,4 +1,3 @@
-
 "use client";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -74,4 +73,3 @@ export default function ClerkPage() {
     </div>
   );
 }
-

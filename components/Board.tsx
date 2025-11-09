@@ -42,9 +42,7 @@ export default function Board({ slug }: { slug: string }) {
   const [snap, setSnap] = useState<Snapshot>({ serving:null, next:null, waiting:0 });
   const supabase = useMemo(() => supabaseBrowser(), []);
 
-  useEffect(() => {
-    fetchSnapshot(slug).then(setSnap).catch(console.error);
-  }, [slug]);
+  useEffect(() => { fetchSnapshot(slug).then(setSnap).catch(console.error); }, [slug]);
 
   useEffect(() => {
     const channel = supabase
@@ -77,4 +75,3 @@ export default function Board({ slug }: { slug: string }) {
     </div>
   );
 }
-
