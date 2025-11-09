@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Board from "@/components/Board";
 
 export default function ClerkPage() {
   const [slug, setSlug] = useState("macelleria-super1");
@@ -20,7 +21,7 @@ export default function ClerkPage() {
   }
 
   return (
-    <div style={{ maxWidth: 520, margin: "40px auto", fontFamily: "system-ui" }}>
+    <div style={{ maxWidth: 640, margin: "40px auto", fontFamily: "system-ui" }}>
       <h1>Banconista — Chiama Prossimo</h1>
       <input
         value={slug}
@@ -36,8 +37,10 @@ export default function ClerkPage() {
 {JSON.stringify(called, null, 2)}
         </pre>
       )}
+
+      {/* Tabellone realtime */}
+      <Board slug={slug} />
     </div>
   );
 }
-
 
