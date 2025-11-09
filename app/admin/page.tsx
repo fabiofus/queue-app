@@ -134,25 +134,6 @@ export default function AdminPage() {
       </div>
 
       <h2 className="mt-6 text-lg font-semibold">Reparti attivi</h2>
-      <button onClick={loadList} disabled={loadingList} className="mt-2 rounded-lg border border-zinc-200 px-3 py-2">
-        {loadingList ? "..." : "Ricarica elenco"}
-      </button>
-
-      <div className="mt-3 space-y-2">
-        {rows.map(r => (
-          <div key={r.id} className="rounded-xl border border-zinc-200 p-3">
-            <div className="text-sm font-medium">{r.store} — {r.name}</div>
-            <div className="text-xs text-zinc-500">slug: <code>{r.slug}</code> • store: <code>{r.storeSlug}</code></div>
-            <div className="mt-1 text-xs">
-              Cliente: <code>{r.takeUrl}</code>
-            </div>
-            <div className="text-xs">
-              Banconista: <code>{r.clerkUrl}</code>
-            </div>
-          </div>
-        ))}
-        {rows.length === 0 && <div className="text-sm text-zinc-500">Nessun reparto ancora.</div>}
-      </div>
     </div>
   );
 }
