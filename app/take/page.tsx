@@ -1,10 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 
 export default function TakePage() {
-  const [slug, setSlug] = useState("macelleria-super1");
+  const searchParams = useSearchParams();
+  const qpSlug = searchParams.get("slug") || "macelleria-super1";
+  const [slug, setSlug] = useState(qpSlug);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setSlug(qpSlug);
+  }, [qpSlug]);
 
   async function take() {
     setLoading(true);
@@ -22,6 +29,7 @@ export default function TakePage() {
   return (
     <div style={{ maxWidth: 520, margin: "40px auto", fontFamily: "system-ui" }}>
       <h1>Prendi Numero</h1>
+      <p style={{ opacity: 0.7, marginBottom: 8 }}>URL param <code>?slug=...</code> rilevato: <b>{qpSlug}</b></p>
       <input
         value={slug}
         onChange={e => setSlug(e.target.value)}
@@ -39,4 +47,3 @@ export default function TakePage() {
     </div>
   );
 }
-
