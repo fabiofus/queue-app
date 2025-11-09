@@ -1,15 +1,17 @@
 "use client";
-import { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Board from "@/components/Board";
 
-export default function ClerkPage() {
+export const dynamic = "force-dynamic";
+
+function ClerkInner() {
   const qp = useSearchParams();
   const slug = useMemo(() => qp.get("slug") || "", [qp]);
 
   const [called, setCalled] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string|null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   async function callNext() {
     try {
@@ -22,9 +24,11 @@ export default function ClerkPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Errore");
       setCalled(data);
-    } catch (e:any) {
+    } catch (e: any) {
       setErr(e.message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (!slug) {
@@ -73,3 +77,12 @@ export default function ClerkPage() {
     </div>
   );
 }
+
+export default function ClerkPageWrapper() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-xl p-6">Caricamento…</div>}>
+      <ClerkInner />
+    </Suspense>
+  );
+}
+

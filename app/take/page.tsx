@@ -1,9 +1,11 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Board from "@/components/Board";
 
-export default function TakePage() {
+export const dynamic = "force-dynamic";
+
+function TakeInner() {
   const qp = useSearchParams();
   const slug = useMemo(() => qp.get("slug") || "", [qp]);
 
@@ -75,3 +77,12 @@ export default function TakePage() {
     </div>
   );
 }
+
+export default function TakePageWrapper() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-xl p-6">Caricamento…</div>}>
+      <TakeInner />
+    </Suspense>
+  );
+}
+
