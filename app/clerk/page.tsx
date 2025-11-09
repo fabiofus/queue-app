@@ -1,44 +1,75 @@
+
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Board from "@/components/Board";
 
 export default function ClerkPage() {
-  const [slug, setSlug] = useState("macelleria-super1");
+  const qp = useSearchParams();
+  const slug = useMemo(() => qp.get("slug") || "", [qp]);
+
   const [called, setCalled] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string|null>(null);
 
   async function callNext() {
-    setLoading(true);
-    setCalled(null);
-    const res = await fetch("/api/call-next", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ counterSlug: slug })
-    });
-    const data = await res.json();
-    setCalled(data);
-    setLoading(false);
+    try {
+      setLoading(true); setErr(null); setCalled(null);
+      const res = await fetch("/api/call-next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ counterSlug: slug })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Errore");
+      setCalled(data);
+    } catch (e:any) {
+      setErr(e.message);
+    } finally { setLoading(false); }
+  }
+
+  if (!slug) {
+    return (
+      <div className="mx-auto max-w-xl p-6">
+        <h1 className="text-2xl font-semibold">Banconista</h1>
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
+          QR non valido: manca <code>?slug=...</code>. Apri questa pagina dal QR del banco.
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ maxWidth: 640, margin: "40px auto", fontFamily: "system-ui" }}>
-      <h1>Banconista — Chiama Prossimo</h1>
-      <input
-        value={slug}
-        onChange={e => setSlug(e.target.value)}
-        placeholder="counter slug"
-        style={{ width: "100%", padding: 8, margin: "8px 0", border: "1px solid #ccc", borderRadius: 6 }}
-      />
-      <button onClick={callNext} disabled={loading} style={{ padding: "10px 16px", borderRadius: 8 }}>
-        {loading ? "..." : "Chiama"}
+    <div className="mx-auto max-w-xl p-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Banconista</h1>
+        <span className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600">
+          {slug}
+        </span>
+      </div>
+
+      <button
+        onClick={callNext}
+        disabled={loading}
+        className="w-full rounded-xl border border-zinc-200 bg-black/90 px-4 py-3 text-white shadow-sm disabled:opacity-60"
+      >
+        {loading ? "..." : "Chiama prossimo"}
       </button>
-      {called && (
-        <pre style={{ marginTop: 16, background: "#f6f6f6", padding: 12, borderRadius: 8 }}>
-{JSON.stringify(called, null, 2)}
+
+      {err && (
+        <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
+{err}
         </pre>
       )}
+      {called && (
+        <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+          <div className="text-sm text-blue-700">Hai chiamato</div>
+          <div className="text-4xl font-black text-blue-900">
+            {called?.next?.ticket_number ?? "—"}
+          </div>
+        </div>
+      )}
 
-      {/* Tabellone realtime */}
       <Board slug={slug} />
     </div>
   );
