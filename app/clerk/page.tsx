@@ -2,7 +2,6 @@
 import React, { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Board from "@/components/Board";
-import ResetForm from "./ResetForm";
 
 export const dynamic = "force-dynamic";
 
@@ -78,7 +77,6 @@ function ClerkInner() {
     </div>
   );
 }
-<ResetForm slug={searchParams?.slug ?? ""} />
 
 export default function ClerkPageWrapper() {
   return (
