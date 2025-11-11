@@ -1,5 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from "next/server";
+import { kv } from "@vercel/kv";
+
+export async function GET(req: Request) {
+  const base =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+
+  const ids = (await kv.smembers<string[]>("counters:index")) || [];
+  const counters: any[] = [];
+
+  for (const id of ids) {
+    const meta = await kv.get<any>(`counter:meta:${id}`);
+    if (!meta) continue;
+    const takeUrl = `${base}/take?slug=${encodeURIComponent(meta.slug)}`;
+    const clerkUrl = `${base}/clerk?slug=${encodeURIComponent(meta.slug)}`;
+    counters.push({
+      ...meta,
+      takeUrl,
+      clerkUrl,
+    });
+  }
+
+  // ordina per store, poi per reparto
+  counters.sort((a, b) => {
+    const s = a.store.localeCompare(b.store);
+    if (s !== 0) return s;
+    return a.name.localeCompare(b.name);
+  });
+
+  return NextResponse.json({ counters });
+}
 
 function assertAdmin(req: NextRequest) {
   const token = req.headers.get("x-admin-token") || "";
