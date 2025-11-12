@@ -1,21 +1,42 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
     const { counterSlug } = await req.json();
-    if (!counterSlug) return NextResponse.json({ error: "counterSlug mancante" }, { status: 400 });
+    if (!counterSlug) return NextResponse.json({ error: 'counterSlug_required' }, { status: 400 });
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_KEY!
-    );
+    const { data: c } = await supabaseAdmin
+      .from('counters')
+      .select('id, last_called_number, last_issued_number')
+      .eq('slug', counterSlug)
+      .single();
 
-    const { data, error } = await supabase.rpc("call_next", { p_counter_slug: counterSlug });
-    if (error) throw error;
+    if (!c) return NextResponse.json({ error: 'counter_not_found' }, { status: 404 });
 
-    return NextResponse.json({ next: data });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    const nextNumber = c.last_called_number + 1;
+    if (nextNumber > c.last_issued_number) {
+      return NextResponse.json({ next: null, waiting_left: 0 });
+    }
+
+    const { error: up1 } = await supabaseAdmin
+      .from('tickets')
+      .update({ status: 'called', called_at: new Date().toISOString() })
+      .eq('counter_id', c.id)
+      .eq('number', nextNumber);
+    if (up1) return NextResponse.json({ error: 'update_ticket_failed' }, { status: 500 });
+
+    const { error: up2 } = await supabaseAdmin
+      .from('counters')
+      .update({ last_called_number: nextNumber })
+      .eq('id', c.id);
+    if (up2) return NextResponse.json({ error: 'update_counter_failed' }, { status: 500 });
+
+    return NextResponse.json({
+      next: { ticket_number: nextNumber },
+      waiting_left: c.last_issued_number - nextNumber
+    });
+  } catch {
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
 }
