@@ -1,17 +1,67 @@
-import { NextResponse } from "next/server";
-import { kv } from "@vercel/kv";
-type Body={storeName:string;storeSlug:string;counterName:string;counterSlug:string};
-export async function POST(req:Request){
-  const b=await req.json() as Partial<Body>;
-  const {storeName,storeSlug,counterName,counterSlug}=b||{};
-  if(!storeName||!storeSlug||!counterName||!counterSlug) return NextResponse.json({error:"missing fields"},{status:400});
-  const id=`${storeSlug}:${counterSlug}`; const now=new Date().toISOString();
-  const meta={id,name:counterName,slug:counterSlug,store:storeName,storeSlug,enabled:true,createdAt:now};
-  await kv.set(`counter:meta:${id}`,meta);
-  await kv.sadd("counters:index",id);
-  await kv.sadd(`store:index:${storeSlug}`,id);
-  const base=process.env.NEXT_PUBLIC_BASE_URL||(process.env.VERCEL_URL?`https://${process.env.VERCEL_URL}`:"");
-  const takeUrl=`${base}/take?slug=${encodeURIComponent(counterSlug)}`;
-  const clerkUrl=`${base}/clerk?slug=${encodeURIComponent(counterSlug)}`;
-  return NextResponse.json({store:{name:storeName,slug:storeSlug},counter:{name:counterName,slug:counterSlug},urls:{take:takeUrl,clerk:clerkUrl}});
+import { NextRequest, NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase';
+import { assertAdmin } from '@/lib/adminGuard';
+
+export async function POST(req: NextRequest) {
+  try {
+    assertAdmin(req.headers);
+    const { storeName, storeSlug, counterName, counterSlug } = await req.json();
+
+    if (!storeName || !storeSlug || !counterName || !counterSlug) {
+      return NextResponse.json({ error: 'missing_params' }, { status: 400 });
+    }
+
+    // upsert store by slug
+    let storeId: string;
+    {
+      const { data: existing } = await supabaseAdmin
+        .from('stores')
+        .select('id')
+        .eq('slug', storeSlug)
+        .maybeSingle();
+      if (existing) {
+        storeId = existing.id;
+      } else {
+        const { data, error } = await supabaseAdmin
+          .from('stores')
+          .insert({ name: storeName, slug: storeSlug })
+          .select('id')
+          .single();
+        if (error) return NextResponse.json({ error: 'store_create_failed' }, { status: 500 });
+        storeId = data.id;
+      }
+    }
+
+    // upsert counter by slug
+    let counter: any;
+    {
+      const { data: existing } = await supabaseAdmin
+        .from('counters')
+        .select('id,name,slug,is_active,last_issued_number,last_called_number')
+        .eq('slug', counterSlug)
+        .maybeSingle();
+      if (existing) {
+        counter = existing;
+      } else {
+        const { data, error } = await supabaseAdmin
+          .from('counters')
+          .insert({ store_id: storeId, name: counterName, slug: counterSlug })
+          .select('id,name,slug,is_active,last_issued_number,last_called_number')
+          .single();
+        if (error) return NextResponse.json({ error: 'counter_create_failed' }, { status: 500 });
+        counter = data;
+      }
+    }
+
+    const { data: store } = await supabaseAdmin
+      .from('stores')
+      .select('id,name,slug,logo_url')
+      .eq('id', storeId)
+      .single();
+
+    return NextResponse.json({ store, counter });
+  } catch (e:any) {
+    const status = e?.status ?? 500;
+    return NextResponse.json({ error: e?.message ?? 'server_error' }, { status });
+  }
 }
