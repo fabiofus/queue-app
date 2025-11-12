@@ -1,88 +1,102 @@
-"use client";
-import React, { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import Board from "@/components/Board";
+'use client';
+import { useState, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useQueueSSE } from '@/lib/useQueueSSE';
 
-export const dynamic = "force-dynamic";
-
-function TakeInner() {
-  const qp = useSearchParams();
-  const slug = useMemo(() => qp.get("slug") || "", [qp]);
-
-  const [result, setResult] = useState<any>(null);
-  const [error, setError] = useState<string|null>(null);
+export default function TakePage() {
+  const params = useSearchParams();
+  const slug = params.get('slug');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [ticket, setTicket] = useState<number | null>(null);
+  const [waitingAhead, setWaitingAhead] = useState<number | null>(null);
+  const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { setResult(null); setError(null); }, [slug]);
+  const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(slug, ticket ?? null);
+  useMemo(() => {
+    if (state) {
+      setLastCalled(state.last_called_number);
+    }
+  }, [state]);
 
-  async function take() {
+  async function takeTicket(confirmSecondWithin10m = false) {
+    if (!slug) return;
+    setLoading(true);
     try {
-      setLoading(true); setError(null); setResult(null);
-      const res = await fetch("/api/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ counterSlug: slug })
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          counterSlug: slug,
+          customer: (fullName || phone) ? { full_name: fullName || null, phone: phone || null } : undefined,
+          confirmSecondWithin10m
+        })
       });
+      if (res.status === 409) {
+        const data = await res.json();
+        const ok = confirm(data?.message || 'Confermi di voler prendere un secondo ticket entro 10 minuti?');
+        if (ok) return takeTicket(true);
+        return;
+      }
+      if (!res.ok) {
+        alert('Errore, riprova.');
+        return;
+      }
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Errore");
-      setResult(data);
-    } catch (e:any) {
-      setError(e.message);
-    } finally { setLoading(false); }
-  }
-
-  if (!slug) {
-    return (
-      <div className="mx-auto max-w-xl p-6">
-        <h1 className="text-2xl font-semibold">Prendi Numero</h1>
-        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
-          QR non valido: manca <code>?slug=...</code>. Scansiona il QR del banco.
-        </div>
-      </div>
-    );
+      setTicket(data.ticket_number);
+      setWaitingAhead(data.waiting_ahead);
+      resetFlags();
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <div className="mx-auto max-w-xl p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Prendi Numero</h1>
-        <span className="rounded-full border border-zinc-300 px-3 py-1 text-xs text-zinc-600">
-          {slug}
-        </span>
+    <div className="max-w-xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Prendi il tuo numero</h1>
+      {!slug && <div className="text-red-600">Slug mancante</div>}
+
+      <div className="grid gap-3">
+        <input
+          placeholder="Nome e cognome (facoltativo)"
+          value={fullName}
+          onChange={e=>setFullName(e.target.value)}
+          className="border rounded-xl p-3"
+        />
+        <input
+          placeholder="Telefono (facoltativo)"
+          value={phone}
+          onChange={e=>setPhone(e.target.value)}
+          className="border rounded-xl p-3"
+        />
+        <button
+          onClick={()=>takeTicket()}
+          disabled={!slug || loading}
+          className="bg-black text-white rounded-xl py-3 disabled:opacity-50"
+        >
+          {loading ? 'Attendi…' : 'Prendi numero'}
+        </button>
       </div>
 
-      <button
-        onClick={take}
-        disabled={loading}
-        className="mt-4 w-full rounded-xl border border-zinc-200 bg-black/90 px-4 py-3 text-white shadow-sm disabled:opacity-60"
-      >
-        {loading ? "..." : "Prendi il tuo numero"}
-      </button>
-
-      {error && (
-        <pre className="mt-4 whitespace-pre-wrap rounded-xl border border-red-200 bg-red-50 p-3 text-red-700">
-{error}
-        </pre>
-      )}
-      {result && (
-        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="text-sm text-emerald-700">Hai preso il numero</div>
-          <div className="text-4xl font-black text-emerald-900">
-            {result?.ticket?.ticket_number ?? "—"}
-          </div>
+      {ticket && (
+        <div className="space-y-2">
+          <div className="text-lg">Il tuo numero: <b>{ticket}</b></div>
+          <div>Chiamato: <b>{lastCalled ?? '-'}</b></div>
+          <div>Persone davanti: <b>{waitingAhead ?? Math.max(0, (state?.last_issued_number ?? 0) - (state?.last_called_number ?? 0) - 1)}</b></div>
         </div>
       )}
 
-      <Board slug={slug} />
+      {nextSoon && (
+        <div className="p-3 rounded-xl bg-yellow-100 border border-yellow-300">
+          Il tuo turno è il prossimo.
+        </div>
+      )}
+      {itsYou && (
+        <div className="p-3 rounded-xl bg-green-100 border border-green-300">
+          È il tuo turno.
+        </div>
+      )}
     </div>
   );
 }
-
-export default function TakePageWrapper() {
-  return (
-    <Suspense fallback={<div className="mx-auto max-w-xl p-6">Caricamento…</div>}>
-      <TakeInner />
-    </Suspense>
-  );
-}
-
