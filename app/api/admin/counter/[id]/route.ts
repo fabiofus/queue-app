@@ -1,12 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { kv } from "@vercel/kv";
 
-export async function DELETE(req: Request, ctx: { params?: { id?: string } }) {
-  const fromParams = ctx?.params?.id;
+// Se vuoi forzare Node runtime, scommenta:
+// export const runtime = "nodejs";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function DELETE(req: NextRequest, context: RouteContext) {
+  // In Next 16 params è una Promise
+  const { id: idFromParams } = await context.params;
+
   const url = new URL(req.url);
-  const fromPath = url.pathname.split("/").pop() || undefined;
-  const fromQuery = url.searchParams.get("id") || undefined;
-  const id = fromParams || fromQuery || fromPath;
+  const idFromPath = url.pathname.split("/").pop() || undefined;
+  const idFromQuery = url.searchParams.get("id") || undefined;
+
+  const id = idFromParams || idFromQuery || idFromPath;
 
   if (!id) {
     return NextResponse.json({ error: "missing id" }, { status: 400 });
@@ -17,8 +25,8 @@ export async function DELETE(req: Request, ctx: { params?: { id?: string } }) {
 
   await kv.del(key);
   await kv.srem("counters:index", id);
-  if (meta?.storeSlug) {
-    await kv.srem(`store:index:${meta.storeSlug}`, id);
+  if (meta && typeof meta === "object" && (meta as any).storeSlug) {
+    await kv.srem(`store:index:${(meta as any).storeSlug}`, id);
   }
 
   return NextResponse.json({ ok: true, id });

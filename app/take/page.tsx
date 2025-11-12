@@ -1,11 +1,21 @@
 'use client';
-import { useState, useMemo } from 'react';
+
+import { Suspense, useState, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQueueSSE } from '@/lib/useQueueSSE';
 
 export default function TakePage() {
+  return (
+    <Suspense fallback={<div />}>
+      <TakeContent />
+    </Suspense>
+  );
+}
+
+function TakeContent() {
   const params = useSearchParams();
   const slug = params.get('slug');
+
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [ticket, setTicket] = useState<number | null>(null);
@@ -14,6 +24,7 @@ export default function TakePage() {
   const [loading, setLoading] = useState(false);
 
   const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(slug, ticket ?? null);
+
   useMemo(() => {
     if (state) {
       setLastCalled(state.last_called_number);
@@ -29,20 +40,27 @@ export default function TakePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           counterSlug: slug,
-          customer: (fullName || phone) ? { full_name: fullName || null, phone: phone || null } : undefined,
-          confirmSecondWithin10m
-        })
+          customer: (fullName || phone)
+            ? { full_name: fullName || null, phone: phone || null }
+            : undefined,
+          confirmSecondWithin10m,
+        }),
       });
+
       if (res.status === 409) {
         const data = await res.json();
-        const ok = confirm(data?.message || 'Confermi di voler prendere un secondo ticket entro 10 minuti?');
+        const ok = confirm(
+          data?.message || 'Confermi di voler prendere un secondo ticket entro 10 minuti?',
+        );
         if (ok) return takeTicket(true);
         return;
       }
+
       if (!res.ok) {
         alert('Errore, riprova.');
         return;
       }
+
       const data = await res.json();
       setTicket(data.ticket_number);
       setWaitingAhead(data.waiting_ahead);
@@ -61,17 +79,17 @@ export default function TakePage() {
         <input
           placeholder="Nome e cognome (facoltativo)"
           value={fullName}
-          onChange={e=>setFullName(e.target.value)}
+          onChange={e => setFullName(e.target.value)}
           className="border rounded-xl p-3"
         />
         <input
           placeholder="Telefono (facoltativo)"
           value={phone}
-          onChange={e=>setPhone(e.target.value)}
+          onChange={e => setPhone(e.target.value)}
           className="border rounded-xl p-3"
         />
         <button
-          onClick={()=>takeTicket()}
+          onClick={() => takeTicket()}
           disabled={!slug || loading}
           className="bg-black text-white rounded-xl py-3 disabled:opacity-50"
         >
@@ -81,9 +99,24 @@ export default function TakePage() {
 
       {ticket && (
         <div className="space-y-2">
-          <div className="text-lg">Il tuo numero: <b>{ticket}</b></div>
-          <div>Chiamato: <b>{lastCalled ?? '-'}</b></div>
-          <div>Persone davanti: <b>{waitingAhead ?? Math.max(0, (state?.last_issued_number ?? 0) - (state?.last_called_number ?? 0) - 1)}</b></div>
+          <div className="text-lg">
+            Il tuo numero: <b>{ticket}</b>
+          </div>
+          <div>
+            Chiamato: <b>{lastCalled ?? '-'}</b>
+          </div>
+          <div>
+            Persone davanti:{' '}
+            <b>
+              {waitingAhead ??
+                Math.max(
+                  0,
+                  (state?.last_issued_number ?? 0) -
+                    (state?.last_called_number ?? 0) -
+                    1,
+                )}
+            </b>
+          </div>
         </div>
       )}
 

@@ -1,13 +1,20 @@
-'use client';
+// lib/supabase-browser.ts
+"use client";
+import { createClient } from "@supabase/supabase-js";
 
-import { createClient } from '@supabase/supabase-js';
-
+/**
+ * Client Supabase per il BROWSER (React).
+ * Usa SOLO in componenti/hooks `use client`.
+ */
 export const supabaseBrowser = () =>
   createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      realtime: { params: { eventsPerSecond: 5 } },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+      },
     }
   );
 

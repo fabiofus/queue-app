@@ -1,74 +1,116 @@
 'use client';
-import { useState, useMemo, useEffect } from 'react';
+
+import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useQueueSSE } from '@/lib/useQueueSSE';
 
 export default function ClerkPage() {
-  const params = useSearchParams();
-  const slug = params.get('slug');
+  return (
+    <Suspense fallback={<div />}>
+      <ClerkContent />
+    </Suspense>
+  );
+}
 
-  const [adminToken, setAdminToken] = useState<string>('');
+function ClerkContent() {
+  const params = useSearchParams();
+  const slug = params.get('slug') || '';
+
   const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [lastIssued, setLastIssued] = useState<number | null>(null);
+  const [waitingAhead, setWaitingAhead] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [adminToken, setAdminToken] = useState('');
 
+  // carica stato iniziale dal GET /api/tickets
   useEffect(() => {
-    const t = localStorage.getItem('ADMIN_TOKEN') || '';
-    setAdminToken(t);
-  }, []);
-  useEffect(() => {
-    if (adminToken) localStorage.setItem('ADMIN_TOKEN', adminToken);
-  }, [adminToken]);
+    if (!slug) return;
+    let abort = false;
 
-  const { state } = useQueueSSE(slug);
-  useMemo(() => {
-    if (state) {
-      setLastCalled(state.last_called_number);
-      setLastIssued(state.last_issued_number);
-    }
-  }, [state]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/tickets?slug=${encodeURIComponent(slug)}`, {
+          method: 'GET',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (abort) return;
 
-  async function callNext() {
+        const li = data.last_issued_number ?? 0;
+        const lc = data.last_called_number ?? 0;
+        const wa = data.waiting_ahead ?? Math.max(0, li - lc);
+
+        setLastIssued(li);
+        setLastCalled(lc);
+        setWaitingAhead(wa);
+      } catch {
+        // ignora per ora
+      }
+    })();
+
+    return () => {
+      abort = true;
+    };
+  }, [slug]);
+
+  const callNext = useCallback(async () => {
     if (!slug) return;
     setLoading(true);
     try {
       const res = await fetch('/api/call-next', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterSlug: slug })
+        body: JSON.stringify({ slug }),
       });
-      const data = await res.json();
       if (!res.ok) {
-        alert(data?.error || 'Errore');
+        alert('Errore chiamando il prossimo numero.');
+        return;
       }
+      const data = await res.json();
+      const called = data.called_number ?? null;
+      const lastIssuedNew = data.last_issued_number ?? lastIssued ?? null;
+      const wa = data.waiting_ahead ?? null;
+
+      setLastCalled(called);
+      setLastIssued(lastIssuedNew);
+      setWaitingAhead(wa);
     } finally {
       setLoading(false);
     }
-  }
+  }, [slug, lastIssued]);
 
-  async function resetCounter() {
-    if (!slug) return;
-    if (!adminToken) {
-      alert('Inserisci Admin Token');
+  const resetCounter = useCallback(async () => {
+    if (!slug || !adminToken) {
+      alert('Serve slug e admin token.');
       return;
     }
-    const ok = confirm('Azzerare contatore?');
-    if (!ok) return;
     setLoading(true);
     try {
       const res = await fetch('/api/admin/counter/reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ counterSlug: slug })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': adminToken,
+        },
+        body: JSON.stringify({ slug }),
       });
-      const data = await res.json();
       if (!res.ok) {
-        alert(data?.error || 'Errore reset');
+        alert('Errore nel reset del contatore.');
+        return;
       }
+      setLastCalled(0);
+      setLastIssued(0);
+      setWaitingAhead(0);
     } finally {
       setLoading(false);
     }
-  }
+  }, [slug, adminToken]);
+
+  const waDisplay =
+    waitingAhead ??
+    Math.max(
+      0,
+      (lastIssued ?? 0) - (lastCalled ?? 0),
+    );
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
@@ -76,8 +118,15 @@ export default function ClerkPage() {
       {!slug && <div className="text-red-600">Slug mancante</div>}
 
       <div className="grid gap-3">
-        <div>Ultimo chiamato: <b>{lastCalled ?? '-'}</b></div>
-        <div>Ultimo emesso: <b>{lastIssued ?? '-'}</b></div>
+        <div>
+          Ultimo chiamato: <b>{lastCalled ?? '-'}</b>
+        </div>
+        <div>
+          Ultimo emesso: <b>{lastIssued ?? '-'}</b>
+        </div>
+        <div>
+          Persone in attesa: <b>{waDisplay}</b>
+        </div>
         <button
           onClick={callNext}
           disabled={!slug || loading}
@@ -91,7 +140,7 @@ export default function ClerkPage() {
         <input
           placeholder="Admin Token"
           value={adminToken}
-          onChange={e=>setAdminToken(e.target.value)}
+          onChange={e => setAdminToken(e.target.value)}
           className="border rounded-xl p-3 w-full"
         />
         <button
@@ -105,3 +154,4 @@ export default function ClerkPage() {
     </div>
   );
 }
+

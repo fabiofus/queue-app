@@ -1,166 +1,363 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
-import { supabaseClient } from '@/lib/supabaseBrowser';
 
-type Store = { id: string; name: string; slug: string; logo_url?: string|null };
-type Counter = { id: string; store_id: string; name: string; slug: string; is_active: boolean; last_issued_number: number; last_called_number: number };
-type StoreWithCounters = Store & { counters: Counter[] };
+import { useState } from 'react';
+
+type Counter = {
+  id: string;
+  name: string;
+  slug: string;
+  is_active: boolean | null;
+  last_issued_number: number | null;
+  last_called_number: number | null;
+};
+
+type Store = {
+  id: string;
+  name: string;
+  slug: string;
+  counters: Counter[];
+};
 
 export default function AdminPage() {
   const [adminToken, setAdminToken] = useState('');
-  const [storeName, setStoreName] = useState('');
-  const [storeSlug, setStoreSlug] = useState('');
-  const [counterName, setCounterName] = useState('');
-  const [counterSlug, setCounterSlug] = useState('');
-  const [stores, setStores] = useState<StoreWithCounters[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const t = localStorage.getItem('ADMIN_TOKEN') || '';
-    setAdminToken(t);
-  }, []);
-  useEffect(() => {
-    if (adminToken) localStorage.setItem('ADMIN_TOKEN', adminToken);
-  }, [adminToken]);
+  // campi per creazione nuovo store/reparto
+  const [newStoreName, setNewStoreName] = useState('');
+  const [newStoreSlug, setNewStoreSlug] = useState('');
+  const [newCounterName, setNewCounterName] = useState('');
+  const [newCounterSlug, setNewCounterSlug] = useState('');
 
-  async function loadList() {
-    if (!adminToken) { alert('Inserisci Admin Token'); return; }
-    const res = await fetch('/api/admin/list', { headers: { 'x-admin-token': adminToken }});
-    if (!res.ok) { alert('Errore lista'); return; }
-    const data = await res.json();
-    setStores(data.stores || []);
-  }
-
-  async function createAll() {
-    if (!adminToken) { alert('Token mancante'); return; }
+  async function loadStores() {
+    if (!adminToken) {
+      alert('Inserisci il token admin');
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/admin/create', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ storeName, storeSlug, counterName, counterSlug })
+      const res = await fetch('/api/admin/list', {
+        headers: {
+          'x-admin-token': adminToken,
+        },
       });
+      if (!res.ok) {
+        setError('Errore nel caricamento dei reparti');
+        return;
+      }
       const data = await res.json();
-      if (!res.ok) { alert(data?.error || 'Errore creazione'); return; }
-      await loadList();
+      setStores(data.stores ?? []);
     } finally {
       setLoading(false);
     }
   }
 
-  async function uploadLogo(store: Store) {
-    if (!adminToken) { alert('Token mancante'); return; }
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const path = `${store.slug}-${Date.now()}-${file.name}`.replace(/\s+/g,'-');
-      const { data: uploaded, error } = await supabaseClient.storage.from('logos').upload(path, file, { upsert: false });
-      if (error) { alert('Upload fallito'); return; }
-      const { data: pub } = supabaseClient.storage.from('logos').getPublicUrl(uploaded.path);
-      const res = await fetch('/api/admin/logo', {
+  async function createReparto() {
+    if (!adminToken) {
+      alert('Inserisci il token admin');
+      return;
+    }
+    if (!newStoreName || !newStoreSlug || !newCounterName || !newCounterSlug) {
+      alert('Compila tutti i campi per creare il reparto');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
-        body: JSON.stringify({ storeId: store.id, logoUrl: pub.publicUrl })
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': adminToken,
+        },
+        body: JSON.stringify({
+          storeName: newStoreName,
+          storeSlug: newStoreSlug,
+          counterName: newCounterName,
+          counterSlug: newCounterSlug,
+        }),
       });
-      if (!res.ok) { alert('Salvataggio URL fallito'); return; }
-      await loadList();
-    };
-    input.click();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert('Errore nella creazione del reparto: ' + (data.error || res.status));
+        return;
+      }
+      // pulisco form e ricarico lista
+      setNewStoreName('');
+      setNewStoreSlug('');
+      setNewCounterName('');
+      setNewCounterSlug('');
+      await loadStores();
+    } finally {
+      setLoading(false);
+    }
   }
 
-  async function resetCounter(counter: Counter) {
-    if (!adminToken) { alert('Token mancante'); return; }
-    if (!confirm(`Azzerare contatore ${counter.name}?`)) return;
-    const res = await fetch('/api/admin/counter/reset', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'x-admin-token': adminToken },
-      body: JSON.stringify({ counterSlug: counter.slug })
-    });
-    if (!res.ok) { alert('Reset fallito'); return; }
-    await loadList();
+  async function downloadReportToday(counter: Counter) {
+    if (!adminToken) {
+      alert('Inserisci il token admin');
+      return;
+    }
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    try {
+      const res = await fetch(
+        `/api/admin/contacts.csv?slug=${encodeURIComponent(
+          counter.slug,
+        )}&date=${today}`,
+        {
+          headers: {
+            'x-admin-token': adminToken,
+          },
+        },
+      );
+      if (!res.ok) {
+        alert('Errore nel generare il report');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `report-${counter.slug}-${today}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('Errore imprevisto nel download del report');
+    }
   }
 
-  async function downloadContacts(store: Store) {
-    if (!adminToken) { alert('Token mancante'); return; }
-    const res = await fetch(`/api/admin/contacts.csv?storeId=${store.id}`, {
-      headers: { 'x-admin-token': adminToken }
-    });
-    if (!res.ok) { alert('Download fallito'); return; }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `contacts-${store.slug}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function toggleStore(store: Store, active: boolean) {
+    if (!adminToken) {
+      alert('Inserisci il token admin');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/store/status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': adminToken,
+        },
+        body: JSON.stringify({ storeId: store.id, active }),
+      });
+      if (!res.ok) {
+        alert('Errore nel cambiare stato del supermercato');
+        return;
+      }
+      setStores(prev =>
+        prev.map(s =>
+          s.id === store.id
+            ? {
+                ...s,
+                counters: s.counters.map(c => ({
+                  ...c,
+                  is_active: active,
+                })),
+              }
+            : s,
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { loadList().catch(()=>{}); }, [adminToken]);
+  async function deleteStore(store: Store) {
+    if (!adminToken) {
+      alert('Inserisci il token admin');
+      return;
+    }
+    const ok = confirm(
+      `Sei sicuro di voler eliminare il supermercato "${store.name}" e tutti i suoi reparti?`,
+    );
+    if (!ok) return;
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || '';
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/store/${store.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-admin-token': adminToken,
+        },
+      });
+      if (!res.ok) {
+        alert("Errore nell'eliminazione del supermercato");
+        return;
+      }
+      setStores(prev => prev.filter(s => s.id !== store.id));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Admin</h1>
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold mb-2">Admin</h1>
 
-      <div className="grid gap-3">
+      {/* token + load */}
+      <div className="space-y-3 border-b pb-4">
         <input
-          placeholder="Admin Token"
+          type="password"
+          placeholder="Admin token"
           value={adminToken}
-          onChange={e=>setAdminToken(e.target.value)}
-          className="border rounded-xl p-3"
+          onChange={e => setAdminToken(e.target.value)}
+          className="border rounded-xl p-3 w-full"
         />
+        <button
+          onClick={loadStores}
+          disabled={loading || !adminToken}
+          className="bg-black text-white rounded-xl py-3 px-4 disabled:opacity-50"
+        >
+          {loading ? 'Carico…' : 'Carica reparti'}
+        </button>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
       </div>
 
-      <div className="grid gap-3 border rounded-2xl p-4">
-        <h2 className="font-semibold">Crea Store + Reparto</h2>
-        <input placeholder="Nome store" value={storeName} onChange={e=>setStoreName(e.target.value)} className="border rounded-xl p-3" />
-        <input placeholder="Slug store" value={storeSlug} onChange={e=>setStoreSlug(e.target.value)} className="border rounded-xl p-3" />
-        <input placeholder="Nome reparto" value={counterName} onChange={e=>setCounterName(e.target.value)} className="border rounded-xl p-3" />
-        <input placeholder="Slug reparto" value={counterSlug} onChange={e=>setCounterSlug(e.target.value)} className="border rounded-xl p-3" />
-        <button onClick={createAll} disabled={loading} className="bg-black text-white rounded-xl py-3 disabled:opacity-50">
-          {loading ? '...' : 'Crea'}
+      {/* form creazione nuovo reparto */}
+      <div className="space-y-3 border-b pb-4">
+        <h2 className="font-semibold">Crea nuovo supermercato/reparto</h2>
+        <input
+          placeholder="Nome supermercato"
+          value={newStoreName}
+          onChange={e => setNewStoreName(e.target.value)}
+          className="border rounded-xl p-3 w-full"
+        />
+        <input
+          placeholder="Slug supermercato (es. il-cortile)"
+          value={newStoreSlug}
+          onChange={e => setNewStoreSlug(e.target.value)}
+          className="border rounded-xl p-3 w-full"
+        />
+        <input
+          placeholder="Nome reparto (es. Reparto Salumeria)"
+          value={newCounterName}
+          onChange={e => setNewCounterName(e.target.value)}
+          className="border rounded-xl p-3 w-full"
+        />
+        <input
+          placeholder="Slug reparto (es. salumeria-ilcortile)"
+          value={newCounterSlug}
+          onChange={e => setNewCounterSlug(e.target.value)}
+          className="border rounded-xl p-3 w-full"
+        />
+        <button
+          onClick={createReparto}
+          disabled={loading || !adminToken}
+          className="bg-green-600 text-white rounded-xl py-3 px-4 disabled:opacity-50"
+        >
+          {loading ? 'Creo…' : 'Crea reparto'}
         </button>
       </div>
 
-      <div className="border rounded-2xl p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold">Reparti attivi</h2>
-          <button onClick={loadList} className="border rounded-xl px-3 py-2">Ricarica</button>
-        </div>
-        <div className="mt-4 space-y-6">
-          {stores.map(store => (
-            <div key={store.id} className="border rounded-xl p-3">
-              <div className="flex items-center gap-3">
-                {store.logo_url ? <img src={store.logo_url} alt="logo" className="h-10 w-10 object-contain" /> : <div className="h-10 w-10 bg-gray-200 rounded" />}
-                <div className="font-medium">{store.name} <span className="text-gray-500">({store.slug})</span></div>
-                <div className="ml-auto flex gap-2">
-                  <button onClick={()=>uploadLogo(store)} className="border rounded-xl px-3 py-2">Carica logo</button>
-                  <button onClick={()=>downloadContacts(store)} className="border rounded-xl px-3 py-2">Scarica contatti CSV</button>
+      {/* lista supermercati / reparti */}
+      <div className="space-y-4">
+        {stores.length === 0 && (
+          <div className="text-sm text-gray-600">
+            Nessun supermercato trovato. Crea un negozio via form qui sopra o via API /admin/create.
+          </div>
+        )}
+
+        {stores.map(store => {
+          const hasActive = store.counters.some(c => c.is_active);
+          return (
+            <div
+              key={store.id}
+              className="border rounded-xl p-4 space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">{store.name}</div>
+                  <div className="text-xs text-gray-500">
+                    slug: {store.slug}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => toggleStore(store, !hasActive)}
+                    disabled={loading}
+                    className="text-sm rounded-xl px-3 py-1 border"
+                  >
+                    {hasActive ? 'Sospendi' : 'Riattiva'}
+                  </button>
+                  <button
+                    onClick={() => deleteStore(store)}
+                    disabled={loading}
+                    className="text-sm rounded-xl px-3 py-1 bg-red-600 text-white"
+                  >
+                    Elimina
+                  </button>
                 </div>
               </div>
-              <div className="mt-3 grid gap-2">
-                {store.counters.map(c => (
-                  <div key={c.id} className="flex items-center justify-between border rounded-xl p-2">
-                    <div>
-                      <div className="font-medium">{c.name} <span className="text-gray-500">({c.slug})</span></div>
-                      <div className="text-sm text-gray-600">Emesso: {c.last_issued_number} • Chiamato: {c.last_called_number}</div>
+
+              {store.counters.length > 0 && (
+                <div className="pl-2 border-l space-y-2 mt-2">
+                  {store.counters.map(c => (
+                    <div
+                      key={c.id}
+                      className="flex flex-col gap-1 text-sm border-b pb-2 last:border-b-0"
+                    >
+                      <div className="flex justify-between">
+                        <div>
+                          {c.name}{' '}
+                          <span className="text-xs text-gray-500">
+                            (slug: {c.slug})
+                          </span>
+                        </div>
+                        <div className="text-xs">
+                          {c.is_active ? 'ATTIVO' : 'SOSPESO'} · emesso:{' '}
+                          {c.last_issued_number ?? 0} · chiamato:{' '}
+                          {c.last_called_number ?? 0}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(
+                              `/qr?mode=take&slug=${encodeURIComponent(
+                                c.slug,
+                              )}`,
+                              '_blank',
+                            )
+                          }
+                          className="text-xs rounded-xl px-3 py-1 border"
+                        >
+                          QR Ticket
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            window.open(
+                              `/qr?mode=clerk&slug=${encodeURIComponent(
+                                c.slug,
+                              )}`,
+                              '_blank',
+                            )
+                          }
+                          className="text-xs rounded-xl px-3 py-1 border"
+                        >
+                          QR Bancone
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadReportToday(c)}
+                          className="text-xs rounded-xl px-3 py-1 border bg-blue-600 text-white"
+                        >
+                          Report oggi (CSV)
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <a className="underline text-blue-600" href={`/take?slug=${c.slug}`} target="_blank">Cliente</a>
-                      <a className="underline text-blue-600" href={`/clerk?slug=${c.slug}`} target="_blank">Bancone</a>
-                      <button onClick={()=>resetCounter(c)} className="bg-red-600 text-white rounded-xl px-3 py-2">Reset</button>
-                    </div>
-                  </div>
-                ))}
-                {store.counters.length === 0 && <div className="text-sm text-gray-500">Nessun reparto</div>}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
