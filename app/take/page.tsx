@@ -1,8 +1,44 @@
 'use client';
 
-import { Suspense, useState, useMemo } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQueueSSE } from '@/lib/useQueueSSE';
+
+const COOLDOWN_MS = 10 * 60 * 1000;
+
+function canTakeTicket() {
+  if (typeof window === 'undefined') return true;
+
+  const raw = window.localStorage.getItem('lastTakeAt');
+  if (!raw) return true;
+
+  const last = Number(raw);
+  if (Number.isNaN(last)) return true;
+
+  const diff = Date.now() - last;
+  return diff >= COOLDOWN_MS;
+}
+
+function getRemainingMinutes() {
+  if (typeof window === 'undefined') return 0;
+
+  const raw = window.localStorage.getItem('lastTakeAt');
+  if (!raw) return 0;
+
+  const last = Number(raw);
+  if (Number.isNaN(last)) return 0;
+
+  const diff = Date.now() - last;
+  const remainingMs = COOLDOWN_MS - diff;
+  if (remainingMs <= 0) return 0;
+
+  return Math.ceil(remainingMs / 60000);
+}
+
+function saveTakeNow() {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('lastTakeAt', String(Date.now()));
+}
 
 export default function TakePage() {
   return (
@@ -22,17 +58,44 @@ function TakeContent() {
   const [waitingAhead, setWaitingAhead] = useState<number | null>(null);
   const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [notifiedTwoBefore, setNotifiedTwoBefore] = useState(false);
 
-  const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(slug, ticket ?? null);
+  const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(
+    slug,
+    ticket ?? null,
+  );
 
-  useMemo(() => {
+  useEffect(() => {
     if (state) {
       setLastCalled(state.last_called_number);
     }
   }, [state]);
 
+  useEffect(() => {
+    if (!ticket || lastCalled == null) return;
+    if (notifiedTwoBefore) return;
+
+    if (lastCalled === ticket - 2) {
+      alert('Tra due numeri tocca a te!');
+      setNotifiedTwoBefore(true);
+    }
+  }, [ticket, lastCalled, notifiedTwoBefore]);
+
   async function takeTicket(confirmSecondWithin10m = false) {
     if (!slug) return;
+
+    if (!confirmSecondWithin10m) {
+      if (!canTakeTicket()) {
+        const remaining = getRemainingMinutes();
+        alert(
+          remaining > 0
+            ? `Hai già preso un numero da poco. Puoi prenderne un altro tra circa ${remaining} minuti.`
+            : 'Hai già preso un numero da poco. Riprova tra qualche minuto.',
+        );
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/tickets', {
@@ -40,9 +103,10 @@ function TakeContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           counterSlug: slug,
-          customer: (fullName || phone)
-            ? { full_name: fullName || null, phone: phone || null }
-            : undefined,
+          customer:
+            fullName || phone
+              ? { full_name: fullName || null, phone: phone || null }
+              : undefined,
           confirmSecondWithin10m,
         }),
       });
@@ -50,7 +114,8 @@ function TakeContent() {
       if (res.status === 409) {
         const data = await res.json();
         const ok = confirm(
-          data?.message || 'Confermi di voler prendere un secondo ticket entro 10 minuti?',
+          data?.message ||
+            'Confermi di voler prendere un secondo ticket entro 10 minuti?',
         );
         if (ok) return takeTicket(true);
         return;
@@ -64,6 +129,8 @@ function TakeContent() {
       const data = await res.json();
       setTicket(data.ticket_number);
       setWaitingAhead(data.waiting_ahead);
+      saveTakeNow();
+      setNotifiedTwoBefore(false);
       resetFlags();
     } finally {
       setLoading(false);
@@ -100,36 +167,4 @@ function TakeContent() {
       {ticket && (
         <div className="space-y-2">
           <div className="text-lg">
-            Il tuo numero: <b>{ticket}</b>
-          </div>
-          <div>
-            Chiamato: <b>{lastCalled ?? '-'}</b>
-          </div>
-          <div>
-            Persone davanti:{' '}
-            <b>
-              {waitingAhead ??
-                Math.max(
-                  0,
-                  (state?.last_issued_number ?? 0) -
-                    (state?.last_called_number ?? 0) -
-                    1,
-                )}
-            </b>
-          </div>
-        </div>
-      )}
-
-      {nextSoon && (
-        <div className="p-3 rounded-xl bg-yellow-100 border border-yellow-300">
-          Il tuo turno è il prossimo.
-        </div>
-      )}
-      {itsYou && (
-        <div className="p-3 rounded-xl bg-green-100 border border-green-300">
-          È il tuo turno.
-        </div>
-      )}
-    </div>
-  );
-}
+            Il tuo numero: <
