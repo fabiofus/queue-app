@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQueueSSE } from '@/lib/useQueueSSE';
 
@@ -60,6 +60,8 @@ function TakeContent() {
   const [loading, setLoading] = useState(false);
   const [notifiedTwoBefore, setNotifiedTwoBefore] = useState(false);
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(
     slug,
     ticket ?? null,
@@ -75,7 +77,16 @@ function TakeContent() {
     if (!ticket || lastCalled == null) return;
     if (notifiedTwoBefore) return;
 
+    // quando il numero chiamato è esattamente due prima del tuo
     if (lastCalled === ticket - 2) {
+      if (audioRef.current) {
+        try {
+          audioRef.current.currentTime = 0;
+          audioRef.current.play().catch(() => {});
+        } catch {
+          // ignora eventuali errori di autoplay
+        }
+      }
       alert('Tra due numeri tocca a te!');
       setNotifiedTwoBefore(true);
     }
@@ -197,6 +208,8 @@ function TakeContent() {
           È il tuo turno.
         </div>
       )}
+
+      <audio ref={audioRef} src="/notification.mp3" preload="auto" />
     </div>
   );
 }
