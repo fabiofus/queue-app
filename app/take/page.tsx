@@ -58,6 +58,12 @@ function loadTicketNumber(slug: string | null): number | null {
   return n;
 }
 
+function clearTicketNumber(slug: string | null) {
+  if (typeof window === 'undefined') return;
+  if (!slug) return;
+  window.localStorage.removeItem(`ticket:${slug}`);
+}
+
 export default function TakePage() {
   return (
     <Suspense fallback={<div />}>
@@ -94,17 +100,32 @@ function TakeContent() {
     }
   }, [slug]);
 
+  // aggiorna lastCalled dallo stato SSE
   useEffect(() => {
     if (state) {
       setLastCalled(state.last_called_number);
     }
   }, [state]);
 
+  // se il bancone ha già superato il tuo numero, libera il ticket
+  useEffect(() => {
+    if (!slug) return;
+    if (ticket == null) return;
+    if (lastCalled == null) return;
+
+    // quando il numero chiamato è maggiore del tuo, consideriamo il ticket "consumato"
+    if (lastCalled > ticket) {
+      clearTicketNumber(slug);
+      setTicket(null);
+      setNotifiedTwoBefore(false);
+    }
+  }, [slug, ticket, lastCalled]);
+
+  // notifica + suono quando mancano 2 numeri
   useEffect(() => {
     if (!ticket || lastCalled == null) return;
     if (notifiedTwoBefore) return;
 
-    // quando il numero chiamato è esattamente due prima del tuo
     if (lastCalled === ticket - 2) {
       if (audioRef.current) {
         try {
@@ -121,6 +142,16 @@ function TakeContent() {
 
   async function takeTicket(confirmSecondWithin10m = false) {
     if (!slug) return;
+
+    // BLOCCO: massimo 1 ticket attivo per questo reparto su questo dispositivo
+    const existing = loadTicketNumber(slug);
+    if (existing != null && !confirmSecondWithin10m) {
+      setTicket(existing);
+      alert(
+        `Hai già un numero attivo per questo reparto: ${existing}. Mostra questo numero al banco.`,
+      );
+      return;
+    }
 
     if (!confirmSecondWithin10m) {
       if (!canTakeTicket()) {
