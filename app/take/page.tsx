@@ -167,4 +167,37 @@ function TakeContent() {
       {ticket && (
         <div className="space-y-2">
           <div className="text-lg">
-            Il tuo numero: <
+            Il tuo numero: <b>{ticket}</b>
+          </div>
+          <div>
+            Chiamato: <b>{lastCalled ?? '-'}</b>
+          </div>
+          <div>
+            Persone davanti:{' '}
+            <b>
+              {waitingAhead ??
+                Math.max(
+                  0,
+                  (state?.last_issued_number ?? 0) -
+                    (state?.last_called_number ?? 0) -
+                    1,
+                )}
+            </b>
+          </div>
+        </div>
+      )}
+
+      {nextSoon && (
+        <div className="p-3 rounded-xl bg-yellow-100 border border-yellow-300">
+          Il tuo turno è il prossimo.
+        </div>
+      )}
+      {itsYou && (
+        <div className="p-3 rounded-xl bg-green-100 border border-green-300">
+          È il tuo turno.
+        </div>
+      )}
+    </div>
+  );
+}
+
