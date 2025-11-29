@@ -1,3 +1,4 @@
+
 'use client';
 
 import { Suspense, useState, useEffect, useRef } from 'react';
@@ -40,6 +41,23 @@ function saveTakeNow() {
   window.localStorage.setItem('lastTakeAt', String(Date.now()));
 }
 
+function saveTicketNumber(slug: string | null, ticket: number | null) {
+  if (typeof window === 'undefined') return;
+  if (!slug) return;
+  if (ticket == null) return;
+  window.localStorage.setItem(`ticket:${slug}`, String(ticket));
+}
+
+function loadTicketNumber(slug: string | null): number | null {
+  if (typeof window === 'undefined') return null;
+  if (!slug) return null;
+  const raw = window.localStorage.getItem(`ticket:${slug}`);
+  if (!raw) return null;
+  const n = Number(raw);
+  if (Number.isNaN(n)) return null;
+  return n;
+}
+
 export default function TakePage() {
   return (
     <Suspense fallback={<div />}>
@@ -66,6 +84,15 @@ function TakeContent() {
     slug,
     ticket ?? null,
   );
+
+  // recupera il ticket salvato se ricarichi / riapri la pagina
+  useEffect(() => {
+    if (!slug) return;
+    const stored = loadTicketNumber(slug);
+    if (stored != null) {
+      setTicket(stored);
+    }
+  }, [slug]);
 
   useEffect(() => {
     if (state) {
@@ -141,6 +168,7 @@ function TakeContent() {
       setTicket(data.ticket_number);
       setWaitingAhead(data.waiting_ahead);
       saveTakeNow();
+      saveTicketNumber(slug, data.ticket_number);
       setNotifiedTwoBefore(false);
       resetFlags();
     } finally {
