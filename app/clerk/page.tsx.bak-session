@@ -1,13 +1,7 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-
-type Merchant = {
-  display_name?: string;
-  theme?: Record<string, any>;
-  copy?: Record<string, any>;
-};
 
 type Contact = { full_name: string | null; phone: string | null };
 
@@ -23,10 +17,11 @@ function ClerkContent() {
   const params = useSearchParams();
   const slug = params.get('slug') || '';
 
-  const [merchant, setMerchant] = useState<Merchant | null>(null);
-
-  const [authed, setAuthed] = useState(false);
   const [pin, setPin] = useState('');
+  const [authed, setAuthed] = useState(false);
+
+  const [title, setTitle] = useState('Bancone');
+  const [subtitle, setSubtitle] = useState('');
 
   const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [lastIssued, setLastIssued] = useState<number | null>(null);
@@ -35,67 +30,27 @@ function ClerkContent() {
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // carica brand/copy per titolo
-  useEffect(() => {
-    if (!slug) return;
-    let cancelled = false;
-
-    fetch(`/api/merchant?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => {
-        if (cancelled) return;
-        setMerchant(d?.merchant ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMerchant(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
-  // verifica sessione clerk esistente
-  useEffect(() => {
-    if (!slug) return;
-    let cancelled = false;
-
-    fetch('/api/clerk/session', { cache: 'no-store' })
-      .then(r => (r.ok ? r.json() : null))
-      .then(d => {
-        if (cancelled) return;
-        if (d?.ok && d?.slug === slug) setAuthed(true);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
-  // stato iniziale contatore (pubblico)
+  // stato iniziale contatore
   useEffect(() => {
     if (!slug) return;
     (async () => {
-      try {
-        const res = await fetch(`/api/tickets?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        setLastIssued(data.last_issued_number ?? 0);
-        setLastCalled(data.last_called_number ?? 0);
-        setWaitingAhead(
-          data.waiting_ahead ??
-            Math.max(0, (data.last_issued_number ?? 0) - (data.last_called_number ?? 0))
-        );
-      } catch {}
+      const res = await fetch(`/api/tickets?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setLastIssued(data.last_issued_number ?? 0);
+      setLastCalled(data.last_called_number ?? 0);
+      setWaitingAhead(data.waiting_ahead ?? Math.max(0, (data.last_issued_number ?? 0) - (data.last_called_number ?? 0)));
     })();
   }, [slug]);
 
-  const title = (merchant?.copy?.clerk_title as string) || 'Bancone';
-  const subtitle =
-    (merchant?.copy?.clerk_subtitle as string) ||
-    (merchant?.display_name ? `Locale: ${merchant.display_name}` : slug ? `Slug: ${slug}` : '');
+  // titolo (per ora: fallback; poi lo leghiamo al tuo admin con merchants.copy.clerk_title)
+  useEffect(() => {
+    if (!slug) return;
+    // puoi cambiarlo dal tuo admin salvando in merchants.copy.clerk_title / clerk_subtitle
+    // qui lo lasciamo semplice: se vuoi, nel prossimo step lo colleghiamo al tuo endpoint admin
+    setTitle('Bancone');
+    setSubtitle(slug);
+  }, [slug]);
 
   const login = useCallback(async () => {
     if (!slug) return alert('Slug mancante');
@@ -120,6 +75,7 @@ function ClerkContent() {
       }
       setAuthed(true);
       setPin('');
+      alert('Accesso OK ✅');
     } finally {
       setLoading(false);
     }
@@ -136,7 +92,6 @@ function ClerkContent() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (res.status === 401) setAuthed(false);
         alert(data?.error || 'Errore chiamando il prossimo numero.');
         return;
       }
@@ -149,6 +104,7 @@ function ClerkContent() {
       setLastIssued(issued);
       setWaitingAhead(wa);
 
+      // carica contatto del numero appena chiamato
       if (called != null && called > 0) {
         const r2 = await fetch(
           `/api/clerk/ticket-info?slug=${encodeURIComponent(slug)}&ticket=${encodeURIComponent(String(called))}`,
@@ -164,45 +120,13 @@ function ClerkContent() {
     }
   }, [slug, lastIssued]);
 
-  const resetCounter = useCallback(async () => {
-    if (!slug) return;
-    const ok = confirm('Resetto il contatore a 0?');
-    if (!ok) return;
-
-    setLoading(true);
-    try {
-      const res = await fetch('/api/clerk/reset-counter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slug }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 401) setAuthed(false);
-        alert(data?.error || 'Errore reset');
-        return;
-      }
-
-      setLastCalled(0);
-      setLastIssued(0);
-      setWaitingAhead(0);
-      setContact(null);
-      alert('Contatore resettato ✅');
-    } finally {
-      setLoading(false);
-    }
-  }, [slug]);
-
   const sendNudge = useCallback(async () => {
+    if (!slug) return;
     const current = lastCalled ?? 0;
     if (current <= 0) return alert('Nessun numero chiamato.');
-
-    const defaultMsg =
-      (merchant?.copy?.nudge_message as string) ||
+    const msg =
+      prompt('Messaggio sollecito (lascia vuoto per default):') ||
       'Il tuo turno è arrivato: per favore presentati al bancone.';
-    const msg = prompt('Messaggio sollecito:', defaultMsg);
-    if (msg == null) return;
-
     setLoading(true);
     try {
       const res = await fetch('/api/clerk/nudge', {
@@ -211,24 +135,19 @@ function ClerkContent() {
         body: JSON.stringify({ slug, ticket_number: current, message: msg }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (res.status === 401) setAuthed(false);
-        alert(data?.error || 'Errore invio sollecito');
-        return;
-      }
+      if (!res.ok) return alert(data?.error || 'Errore invio sollecito');
       alert('Sollecito inviato ✅');
     } finally {
       setLoading(false);
     }
-  }, [slug, lastCalled, merchant]);
+  }, [slug, lastCalled]);
 
   const waDisplay = useMemo(() => {
-    return waitingAhead ?? Math.max(0, (lastIssued ?? 0) - (lastCalled ?? 0));
+    return (
+      waitingAhead ??
+      Math.max(0, (lastIssued ?? 0) - (lastCalled ?? 0))
+    );
   }, [waitingAhead, lastIssued, lastCalled]);
-
-  const phoneDigits = (contact?.phone || '').replace(/[^\d+]/g, '');
-  const waLink = phoneDigits ? `https://wa.me/${phoneDigits.replace(/^\+/, '')}` : null;
-  const telLink = phoneDigits ? `tel:${phoneDigits}` : null;
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
@@ -273,45 +192,21 @@ function ClerkContent() {
               {loading ? '...' : 'Chiama prossimo'}
             </button>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={sendNudge}
-                disabled={!slug || loading || (lastCalled ?? 0) <= 0}
-                className="border rounded-xl py-3 px-4 disabled:opacity-50"
-              >
-                Sollecita cliente
-              </button>
-
-              <button
-                onClick={resetCounter}
-                disabled={!slug || loading}
-                className="bg-red-600 text-white rounded-xl py-3 px-4 disabled:opacity-50"
-              >
-                Reset contatore
-              </button>
-            </div>
+            <button
+              onClick={sendNudge}
+              disabled={!slug || loading || (lastCalled ?? 0) <= 0}
+              className="border rounded-xl py-3 disabled:opacity-50"
+            >
+              Invia sollecito (cliente in ritardo)
+            </button>
           </div>
 
           <div className="border rounded-xl p-4">
             <div className="font-semibold mb-2">Cliente (se inserito)</div>
             {contact ? (
-              <div className="space-y-2 text-sm">
+              <div className="space-y-1 text-sm">
                 <div>Nome: <b>{contact.full_name || '—'}</b></div>
                 <div>Telefono: <b>{contact.phone || '—'}</b></div>
-                {(waLink || telLink) && (
-                  <div className="flex gap-2 flex-wrap">
-                    {waLink && (
-                      <a className="border rounded-xl px-3 py-2" href={waLink} target="_blank">
-                        WhatsApp
-                      </a>
-                    )}
-                    {telLink && (
-                      <a className="border rounded-xl px-3 py-2" href={telLink}>
-                        Chiama
-                      </a>
-                    )}
-                  </div>
-                )}
               </div>
             ) : (
               <div className="text-sm text-gray-600">Nessun dato disponibile per questo numero.</div>

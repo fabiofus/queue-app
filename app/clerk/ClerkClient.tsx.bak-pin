@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 
 export default function ClerkClient({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(false);
-  const [pin, setPin] = useState("");
+  const [adminToken, setAdminToken] = useState("");
 
   const callNext = useCallback(async () => {
     if (!slug) return;
@@ -17,35 +17,18 @@ export default function ClerkClient({ slug }: { slug: string }) {
   }, [slug]);
 
   const resetCounter = useCallback(async () => {
-    if (!slug) return alert("Slug mancante");
-    if (!pin) return alert("Inserisci il PIN");
-
+    if (!slug || !adminToken) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/clerk/reset`, {
+      await fetch(`/api/admin/counter/reset`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, pin }),
+        headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
+        body: JSON.stringify({ slug }),
       });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg =
-          data?.error === "invalid_pin"
-            ? "PIN errato"
-            : data?.error === "pin_not_set"
-              ? "PIN non impostato (contatta ENG)"
-              : data?.error || "Errore reset";
-        alert(msg);
-        return;
-      }
-
-      alert("Contatore resettato ✅");
-      setPin("");
     } finally {
       setLoading(false);
     }
-  }, [slug, pin]);
+  }, [slug, adminToken]);
 
   return (
     <>
@@ -63,10 +46,9 @@ export default function ClerkClient({ slug }: { slug: string }) {
 
       <div className="border-t pt-4 space-y-3">
         <input
-          placeholder="PIN Reset"
-          type="password"
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
+          placeholder="Admin Token"
+          value={adminToken}
+          onChange={(e) => setAdminToken(e.target.value)}
           className="border rounded-xl p-3 w-full"
         />
         <button
@@ -80,3 +62,4 @@ export default function ClerkClient({ slug }: { slug: string }) {
     </>
   );
 }
+

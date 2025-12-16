@@ -25,9 +25,6 @@ type Merchant = {
   theme: Record<string, any>;
   copy: Record<string, any>;
   is_active: boolean;
-
-  clerk_pin_enabled?: boolean;
-  has_clerk_pin?: boolean;
 };
 
 const DEFAULT_THEME = {
@@ -59,9 +56,6 @@ export default function AdminPage() {
   const [brandOpenSlug, setBrandOpenSlug] = useState<string | null>(null);
   const [brandLoading, setBrandLoading] = useState(false);
   const [brandForm, setBrandForm] = useState<Merchant | null>(null);
-
-  // PIN editor (non salvare mai il PIN nel DB in chiaro: lo mandiamo solo come clerk_pin)
-  const [pinDraft, setPinDraft] = useState<string>('');
 
   function requireToken() {
     if (!adminToken) {
@@ -132,10 +126,10 @@ export default function AdminPage() {
           theme: DEFAULT_THEME,
           copy: DEFAULT_COPY,
           is_active: true,
-          clerk_pin_enabled: true,
         }),
       }).catch(() => {});
 
+      // pulisco form e ricarico lista
       setNewStoreName('');
       setNewStoreSlug('');
       setNewCounterName('');
@@ -256,13 +250,10 @@ export default function AdminPage() {
         is_active: m?.is_active ?? true,
         theme: { ...DEFAULT_THEME, ...(m?.theme ?? {}) },
         copy: { ...DEFAULT_COPY, ...(m?.copy ?? {}) },
-        clerk_pin_enabled: m?.clerk_pin_enabled ?? true,
-        has_clerk_pin: m?.has_clerk_pin ?? false,
       };
 
       setBrandForm(merged);
       setBrandOpenSlug(slug);
-      setPinDraft('');
     } finally {
       setBrandLoading(false);
     }
@@ -274,77 +265,22 @@ export default function AdminPage() {
 
     setBrandLoading(true);
     try {
-      const payload: any = { ...brandForm };
-
-      // non mandiamo has_clerk_pin (è derivato)
-      delete payload.has_clerk_pin;
-
-      // se c'è un PIN nuovo lo mandiamo come clerk_pin
-      const p = pinDraft.trim();
-      if (p.length > 0) {
-        payload.clerk_pin = p;
-      }
-
       const res = await fetch('/api/admin/merchant', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-admin-token': adminToken,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(brandForm),
       });
 
-      const data = await res.json().catch(() => ({}));
-
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         alert('Errore nel salvataggio brand: ' + (data.error || res.status));
         return;
       }
 
-      // aggiorna form con ciò che torna dal server (include has_clerk_pin)
-      if (data?.merchant) {
-        setBrandForm((prev) => prev ? { ...prev, ...data.merchant } : data.merchant);
-      }
-      setPinDraft('');
-      alert('Salvato ✅');
-    } finally {
-      setBrandLoading(false);
-    }
-  }
-
-  async function clearPin() {
-    if (!requireToken()) return;
-    if (!brandForm) return;
-
-    const ok = confirm('Vuoi cancellare il PIN di reset per questo locale?');
-    if (!ok) return;
-
-    setBrandLoading(true);
-    try {
-      const res = await fetch('/api/admin/merchant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-token': adminToken,
-        },
-        body: JSON.stringify({
-          slug: brandForm.slug,
-          clear_clerk_pin: true,
-          clerk_pin_enabled: brandForm.clerk_pin_enabled ?? true,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert('Errore nel cancellare PIN: ' + (data.error || res.status));
-        return;
-      }
-
-      if (data?.merchant) {
-        setBrandForm((prev) => prev ? { ...prev, ...data.merchant } : data.merchant);
-      }
-      setPinDraft('');
-      alert('PIN cancellato ✅');
+      alert('Brand salvato ✅');
     } finally {
       setBrandLoading(false);
     }
@@ -354,6 +290,7 @@ export default function AdminPage() {
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold mb-2">Admin</h1>
 
+      {/* token + load */}
       <div className="space-y-3 border-b pb-4">
         <input
           type="password"
@@ -372,6 +309,7 @@ export default function AdminPage() {
         {error && <div className="text-red-600 text-sm">{error}</div>}
       </div>
 
+      {/* form creazione nuovo reparto */}
       <div className="space-y-3 border-b pb-4">
         <h2 className="font-semibold">Crea nuovo supermercato/reparto</h2>
         <input
@@ -407,10 +345,11 @@ export default function AdminPage() {
         </button>
       </div>
 
+      {/* lista supermercati / reparti */}
       <div className="space-y-4">
         {stores.length === 0 && (
           <div className="text-sm text-gray-600">
-            Nessun supermercato trovato.
+            Nessun supermercato trovato. Crea un negozio via form qui sopra o via API /admin/create.
           </div>
         )}
 
@@ -493,13 +432,6 @@ export default function AdminPage() {
                         >
                           Apri Take
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => window.open(`/clerk/reset?slug=${encodeURIComponent(c.slug)}`, '_blank')}
-                          className="text-xs rounded-xl px-3 py-1 border"
-                        >
-                          Clerk Reset
-                        </button>
                       </div>
 
                       {brandOpenSlug === c.slug && brandForm && (
@@ -511,15 +443,10 @@ export default function AdminPage() {
                               onClick={() => {
                                 setBrandOpenSlug(null);
                                 setBrandForm(null);
-                                setPinDraft('');
                               }}
                             >
                               Chiudi
                             </button>
-                          </div>
-
-                          <div className="text-xs text-gray-700">
-                            PIN impostato: <b>{brandForm.has_clerk_pin ? 'Sì' : 'No'}</b>
                           </div>
 
                           <div className="grid gap-2">
@@ -545,7 +472,6 @@ export default function AdminPage() {
                             />
 
                             <label className="text-xs text-gray-600">Sottotitolo</label>
-
                             <input
                               className="border rounded-xl p-3"
                               value={brandForm.copy?.subtitle ?? ''}
@@ -553,31 +479,6 @@ export default function AdminPage() {
                                 setBrandForm({ ...brandForm, copy: { ...brandForm.copy, subtitle: e.target.value } })
                               }
                             />
-                            <label className="text-xs text-gray-600">Titolo Bancone (clerk)</label>
-                            <input
-                              className="border rounded-xl p-3"
-                              value={brandForm.copy?.clerk_title ?? ''}
-                              onChange={e =>
-                                setBrandForm({
-                                  ...brandForm,
-                                  copy: { ...brandForm.copy, clerk_title: e.target.value },
-                                })
-                              }
-                            />
-
-                            <label className="text-xs text-gray-600">Sottotitolo Bancone (clerk)</label>
-                            <input
-                              className="border rounded-xl p-3"
-                              value={brandForm.copy?.clerk_subtitle ?? ''}
-                              onChange={e =>
-                                setBrandForm({
-                                  ...brandForm,
-                                  copy: { ...brandForm.copy, clerk_subtitle: e.target.value },
-                                })
-                              }
-                            />
-
-
                           </div>
 
                           <div className="grid md:grid-cols-2 gap-2">
@@ -604,40 +505,13 @@ export default function AdminPage() {
                             Attivo (mostrabile al pubblico)
                           </label>
 
-                          <label className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={brandForm.clerk_pin_enabled ?? true}
-                              onChange={e => setBrandForm({ ...brandForm, clerk_pin_enabled: e.target.checked })}
-                            />
-                            PIN reset abilitato (clerk)
-                          </label>
-
-                          <div className="grid gap-2">
-                            <label className="text-xs text-gray-600">Nuovo PIN (min 4) — lascia vuoto per non cambiarlo</label>
-                            <input
-                              className="border rounded-xl p-3"
-                              type="password"
-                              value={pinDraft}
-                              onChange={(e) => setPinDraft(e.target.value)}
-                              placeholder="••••"
-                            />
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex gap-2">
                             <button
                               className="rounded-xl px-4 py-2 bg-black text-white disabled:opacity-50"
                               onClick={saveBrand}
                               disabled={brandLoading}
                             >
-                              {brandLoading ? 'Salvo…' : 'Salva brand / PIN'}
-                            </button>
-                            <button
-                              className="rounded-xl px-4 py-2 border disabled:opacity-50"
-                              onClick={clearPin}
-                              disabled={brandLoading}
-                            >
-                              Cancella PIN
+                              {brandLoading ? 'Salvo…' : 'Salva brand'}
                             </button>
                             <a
                               className="rounded-xl px-4 py-2 border"
@@ -646,10 +520,6 @@ export default function AdminPage() {
                             >
                               Preview
                             </a>
-                          </div>
-
-                          <div className="text-xs text-gray-500">
-                            Il PIN non viene mai salvato in chiaro: viene hashato lato server.
                           </div>
                         </div>
                       )}
