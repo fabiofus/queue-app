@@ -9,7 +9,12 @@ type Merchant = {
   copy?: Record<string, any>;
 };
 
-type Contact = { full_name: string | null; phone: string | null };
+type Contact = {
+  full_name: string | null;
+  phone: string | null;
+  seats: number | null;
+  notes: string | null;
+};
 
 export default function ClerkPage() {
   return (
@@ -206,6 +211,7 @@ function ClerkContent() {
         setLastIssued(0);
         setWaitingAhead(0);
         setContact(null);
+        setLastManualTicket(null); // <-- resetta anche l'ultimo numero manuale
         alert('Contatore resettato ✅');
       } finally {
         setLoading(false);
@@ -246,7 +252,7 @@ function ClerkContent() {
     [slug, lastCalled, merchant],
   );
 
-  // nuovo: crea ticket manuale per cliente senza app
+  // crea ticket manuale per cliente senza app (bypassa i controlli cliente)
   const handleManualTicket = useCallback(
     async () => {
       if (!slug) return;
@@ -258,8 +264,8 @@ function ClerkContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             counterSlug: slug,
-            firmSecondWithin10m: true, // il clerk può sempre prendere un altro numero
-            fromClerk: true, // <<< importantissimo: dice all'API di saltare il controllo active_ticket_exists
+            confirmSecondWithin10m: true,
+            fromClerk: true,
             // niente customer: il numero viene comunicato a voce
           }),
         });
@@ -274,8 +280,8 @@ function ClerkContent() {
 
         const issued = data.last_issued_number ?? lastIssued ?? null;
         const wa = data.waiting_ahead ?? null;
-        setLastIssued(issued);
-        setWaitingAhead(wa);
+        if (issued != null) setLastIssued(issued);
+        if (wa != null) setWaitingAhead(wa);
       } finally {
         setManualCreating(false);
       }
@@ -384,7 +390,7 @@ function ClerkContent() {
 
           <div className="border rounded-xl p-4">
             <div className="font-semibold mb-2">
-              Cliente (se inserito)
+              Dettagli cliente (se inseriti)
             </div>
             {contact ? (
               <div className="space-y-2 text-sm">
@@ -393,6 +399,12 @@ function ClerkContent() {
                 </div>
                 <div>
                   Telefono: <b>{contact.phone || '—'}</b>
+                </div>
+                <div>
+                  Posti: <b>{contact.seats ?? '—'}</b>
+                </div>
+                <div>
+                  Note: <b>{contact.notes || '—'}</b>
                 </div>
                 {(waLink || telLink) && (
                   <div className="flex gap-2 flex-wrap">

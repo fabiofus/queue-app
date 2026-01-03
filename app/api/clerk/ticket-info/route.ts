@@ -1,30 +1,51 @@
-import { NextRequest, NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { verifyClerkSession, getClerkCookieName } from "@/lib/clerkSession";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(getClerkCookieName())?.value;
-  const session = verifyClerkSession(token);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  try {
+    const url = req.nextUrl;
+    const slug = url.searchParams.get("slug") || "";
+    const ticketParam = url.searchParams.get("ticket") || "";
 
-  const slug = (req.nextUrl.searchParams.get("slug") || session.slug || "").trim();
-  const ticket = Number((req.nextUrl.searchParams.get("ticket") || "").trim());
+    if (!slug) {
+      return NextResponse.json({ error: "missing_slug" }, { status: 400 });
+    }
 
-  if (!slug || !Number.isFinite(ticket)) return NextResponse.json({ error: "bad_request" }, { status: 400 });
-  if (slug !== session.slug) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    const ticketNumber = Number(ticketParam);
+    if (!ticketNumber || Number.isNaN(ticketNumber)) {
+      return NextResponse.json({ error: "invalid_ticket" }, { status: 400 });
+    }
 
-  const { data, error } = await supabaseAdmin
-    .from("contacts")
-    .select("full_name, phone, ticket_number")
-    .eq("counter_slug", slug)
-    .eq("ticket_number", ticket)
-    .order("id", { ascending: false })
-    .limit(1);
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .select("full_name, phone, seats, notes")
+      .eq("counter_slug", slug)
+      .eq("ticket_number", ticketNumber)
+      .maybeSingle();
 
-  if (error) return NextResponse.json({ error: "query_failed" }, { status: 500 });
+    if (error) {
+      console.error("ticket_info_query_failed", error);
+      return NextResponse.json({ error: "ticket_info_error" }, { status: 500 });
+    }
 
-  const row = (data && data[0]) || null;
-  return NextResponse.json({ contact: row ? { full_name: row.full_name, phone: row.phone } : null });
+    return NextResponse.json({
+      contact: data
+        ? {
+            full_name: data.full_name,
+            phone: data.phone,
+            seats: data.seats,
+            notes: data.notes,
+          }
+        : null,
+    });
+  } catch (e: any) {
+    console.error("ticket_info_unhandled", e);
+    return NextResponse.json(
+      { error: e?.message ?? "server_error" },
+      { status: 500 },
+    );
+  }
 }
