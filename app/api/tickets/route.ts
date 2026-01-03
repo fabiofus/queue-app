@@ -1,3 +1,4 @@
+
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -10,7 +11,12 @@ const DEVICE_COOKIE = "eng_device_id";
 
 type TicketBody = {
   counterSlug?: string;
-  customer?: { full_name?: string | null; phone?: string | null };
+  customer?: {
+    full_name?: string | null;
+    phone?: string | null;
+    seats?: number | null;
+    notes?: string | null;
+  };
   confirmSecondWithin10m?: boolean;
   fromClerk?: boolean;
 };
@@ -182,19 +188,20 @@ export async function POST(req: NextRequest) {
       return res;
     }
 
-    // 4) salva contatto agganciato al ticket_number
-    if (customer && (customer.full_name || customer.phone)) {
+    // 4) salva contatto agganciato al ticket_number (anche seats + notes)
+    if (customer && (customer.full_name || customer.phone || customer.seats || customer.notes)) {
       const { error: insertError } = await supabaseAdmin.from("contacts").insert({
         counter_slug: counterSlug,
         ticket_number: ticketNumber,
         full_name: customer.full_name || null,
         phone: customer.phone || null,
+        seats: customer.seats ?? null,
+        notes: customer.notes ?? null,
       });
       if (insertError) console.error("contacts_insert_failed", insertError);
     }
 
     // 5) aggiorna device state (cooldown + ticket attivo)
-    //    Anche il clerk finisce qui, ma i controlli sopra lo ignorano se fromClerk === true
     await supabaseAdmin.from("take_devices").upsert({
       counter_slug: counterSlug,
       device_id: deviceId,

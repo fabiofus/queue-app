@@ -6,29 +6,6 @@ import { useQueueSSE } from '@/lib/useQueueSSE';
 
 const COOLDOWN_MS = 10 * 60 * 1000;
 
-type Merchant = {
-  slug: string;
-  display_name: string;
-  logo_url: string | null;
-  theme: Record<string, any>;
-  copy: Record<string, any>;
-  is_active: boolean;
-};
-
-const DEFAULT_THEME = {
-  bg: '#ffffff',
-  card: '#ffffff',
-  text: '#111111',
-  muted: 'rgba(17,17,17,0.70)',
-  primary: '#000000',
-  buttonText: '#ffffff',
-};
-
-const DEFAULT_COPY = {
-  title: 'Prendi il tuo numero',
-  subtitle: 'Scansiona il QR e prendi il turno',
-};
-
 function canTakeTicket() {
   if (typeof window === 'undefined') return true;
 
@@ -98,11 +75,11 @@ function TakeContent() {
   const params = useSearchParams();
   const slug = params.get('slug');
 
-  const [merchant, setMerchant] = useState<Merchant | null>(null);
-  const [merchantLoading, setMerchantLoading] = useState(false);
-
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [seats, setSeats] = useState(''); // numero di posti (string, poi lo convertiamo)
+  const [notes, setNotes] = useState(''); // note/allergie ecc.
+
   const [ticket, setTicket] = useState<number | null>(null);
   const [waitingAhead, setWaitingAhead] = useState<number | null>(null);
   const [lastCalled, setLastCalled] = useState<number | null>(null);
@@ -111,48 +88,25 @@ function TakeContent() {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(slug, ticket ?? null);
-
-  // carica brand dal DB
-  useEffect(() => {
-    if (!slug) return;
-    let cancelled = false;
-
-    setMerchantLoading(true);
-    fetch(`/api/merchant?slug=${encodeURIComponent(slug)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (cancelled) return;
-        setMerchant(data.merchant ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMerchant(null);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setMerchantLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [slug]);
-
-  const theme = { ...DEFAULT_THEME, ...(merchant?.theme ?? {}) };
-  const copy = { ...DEFAULT_COPY, ...(merchant?.copy ?? {}) };
-  const displayName = merchant?.display_name || slug || 'ENG';
+  const { state, nextSoon, itsYou, resetFlags } = useQueueSSE(
+    slug,
+    ticket ?? null,
+  );
 
   // recupera il ticket salvato se ricarichi / riapri la pagina
   useEffect(() => {
     if (!slug) return;
     const stored = loadTicketNumber(slug);
-    if (stored != null) setTicket(stored);
+    if (stored != null) {
+      setTicket(stored);
+    }
   }, [slug]);
 
   // aggiorna lastCalled dallo stato SSE
   useEffect(() => {
-    if (state) setLastCalled(state.last_called_number);
+    if (state) {
+      setLastCalled(state.last_called_number);
+    }
   }, [state]);
 
   // se il bancone ha già superato il tuo numero, libera il ticket
@@ -178,55 +132,25 @@ function TakeContent() {
         try {
           audioRef.current.currentTime = 0;
           audioRef.current.play().catch(() => {});
-        } catch {}
+        } catch {
+          // ignora errori autoplay
+        }
       }
       alert('Tra due numeri tocca a te!');
       setNotifiedTwoBefore(true);
     }
   }, [ticket, lastCalled, notifiedTwoBefore]);
 
-  // sollecito dal bancone (polling leggero)
-  useEffect(() => {
-    if (!slug) return;
-    if (!ticket) return;
-
-    let stopped = false;
-    const id = setInterval(async () => {
-      if (stopped) return;
-      try {
-        const res = await fetch(
-          `/api/take/nudges?slug=${encodeURIComponent(slug)}&ticket=${encodeURIComponent(String(ticket))}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json().catch(() => ({}));
-        const msg = data?.nudge?.message;
-        if (msg) {
-          if (audioRef.current) {
-            try {
-              audioRef.current.currentTime = 0;
-              await audioRef.current.play().catch(() => {});
-            } catch {}
-          }
-          alert(msg);
-        }
-      } catch {}
-    }, 5000);
-
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
-  }, [slug, ticket]);
-
-
-
   async function takeTicket(confirmSecondWithin10m = false) {
     if (!slug) return;
 
+    // massimo 1 ticket attivo per questo reparto su questo dispositivo
     const existing = loadTicketNumber(slug);
     if (existing != null && !confirmSecondWithin10m) {
       setTicket(existing);
-      alert(`Hai già un numero attivo per questo reparto: ${existing}. Mostra questo numero al banco.`);
+      alert(
+        `Hai già un numero attivo per questo reparto: ${existing}. Mostra questo numero al banco.`,
+      );
       return;
     }
 
@@ -244,22 +168,50 @@ function TakeContent() {
 
     setLoading(true);
     try {
+      const seatsValue =
+        seats.trim() === '' ? null : Number.isNaN(Number(seats)) ? null : Number(seats);
+
       const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           counterSlug: slug,
-          customer: fullName || phone ? { full_name: fullName || null, phone: phone || null } : undefined,
+          customer:
+            fullName || phone || seatsValue !== null || notes
+              ? {
+                  full_name: fullName || null,
+                  phone: phone || null,
+                  seats: seatsValue,
+                  notes: notes || null,
+                }
+              : undefined,
           confirmSecondWithin10m,
         }),
       });
 
       if (res.status === 409) {
         const data = await res.json();
-        const ok = confirm(
-          data?.message || 'Confermi di voler prendere un secondo ticket entro 10 minuti?',
-        );
-        if (ok) return takeTicket(true);
+        if (data?.error === 'active_ticket_exists') {
+          const ok = confirm(
+            data?.message ||
+              'Hai già un numero attivo. Vuoi usare quello esistente?',
+          );
+          if (ok && data.ticket_number) {
+            setTicket(data.ticket_number);
+            saveTicketNumber(slug, data.ticket_number);
+          }
+          return;
+        }
+
+        if (data?.error === 'cooldown') {
+          alert(
+            data?.message ||
+              'Hai già preso un numero da poco, riprova tra qualche minuto.',
+          );
+          return;
+        }
+
+        alert(data?.message || 'Errore, riprova.');
         return;
       }
 
@@ -280,121 +232,82 @@ function TakeContent() {
     }
   }
 
-  const disabled = !slug || loading;
-
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: theme.bg,
-        color: theme.text,
-      }}
-      className="p-6"
-    >
-      <div
-        className="max-w-xl mx-auto space-y-6 rounded-2xl border p-6"
-        style={{ backgroundColor: theme.card, borderColor: 'rgba(0,0,0,0.12)' }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {merchant?.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={merchant.logo_url}
-                alt={displayName}
-                className="h-10 w-10 rounded-xl object-cover"
-              />
-            ) : (
-              <div
-                className="h-10 w-10 rounded-xl"
-                style={{ backgroundColor: theme.primary, opacity: 0.25 }}
-              />
-            )}
+    <div className="max-w-xl mx-auto p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Prendi il tuo numero</h1>
+      {!slug && <div className="text-red-600">Slug mancante</div>}
 
-            <div>
-              <div className="text-sm" style={{ color: theme.muted }}>
-                {displayName}
-              </div>
-              <h1 className="text-2xl font-bold">{copy.title}</h1>
-            </div>
-          </div>
-
-          <div className="text-xs" style={{ color: theme.muted }}>
-            {merchantLoading ? '…' : 'ENG'}
-          </div>
-        </div>
-
-        <div className="text-sm" style={{ color: theme.muted }}>
-          {copy.subtitle}
-        </div>
-
-        {!slug && <div className="text-red-600">Slug mancante</div>}
-
-        <div className="grid gap-3">
-          <input
-            placeholder="Nome e cognome (facoltativo)"
-            value={fullName}
-            onChange={e => setFullName(e.target.value)}
-            className="border rounded-xl p-3"
-            style={{ borderColor: 'rgba(0,0,0,0.18)' }}
-          />
-          <input
-            placeholder="Telefono (facoltativo)"
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            className="border rounded-xl p-3"
-            style={{ borderColor: 'rgba(0,0,0,0.18)' }}
-          />
-          <button
-            onClick={() => takeTicket()}
-            disabled={disabled}
-            className="rounded-xl py-3 disabled:opacity-50"
-            style={{ backgroundColor: theme.primary, color: theme.buttonText ?? '#fff' }}
-          >
-            {loading ? 'Attendi…' : 'Prendi numero'}
-          </button>
-        </div>
-
-        {ticket && (
-          <div className="space-y-2">
-            <div className="text-lg">
-              Il tuo numero: <b>{ticket}</b>
-            </div>
-            <div>
-              Chiamato: <b>{lastCalled ?? '-'}</b>
-            </div>
-            <div>
-              Persone davanti:{' '}
-              <b>
-                {waitingAhead ??
-                  Math.max(
-                    0,
-                    (state?.last_issued_number ?? 0) -
-                      (state?.last_called_number ?? 0) -
-                      1,
-                  )}
-              </b>
-            </div>
-          </div>
-        )}
-
-        {nextSoon && (
-          <div className="p-3 rounded-xl border" style={{ borderColor: 'rgba(0,0,0,0.18)' }}>
-            Il tuo turno è il prossimo.
-          </div>
-        )}
-        {itsYou && (
-          <div className="p-3 rounded-xl border" style={{ borderColor: 'rgba(0,0,0,0.18)' }}>
-            È il tuo turno.
-          </div>
-        )}
-
-        <div className="text-xs" style={{ color: theme.muted }}>
-          Powered by <b>ENG</b>
-        </div>
-
-        <audio ref={audioRef} src="/notification.mp3" preload="auto" />
+      <div className="grid gap-3">
+        <input
+          placeholder="Nome e cognome (facoltativo)"
+          value={fullName}
+          onChange={e => setFullName(e.target.value)}
+          className="border rounded-xl p-3"
+        />
+        <input
+          placeholder="Telefono (facoltativo)"
+          value={phone}
+          onChange={e => setPhone(e.target.value)}
+          className="border rounded-xl p-3"
+        />
+        <input
+          type="number"
+          min={1}
+          placeholder="Numero di posti (facoltativo)"
+          value={seats}
+          onChange={e => setSeats(e.target.value)}
+          className="border rounded-xl p-3"
+        />
+        <textarea
+          placeholder="Note (allergie, passeggino, disabile, sediolone, ecc.) (facoltativo)"
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          className="border rounded-xl p-3 min-h-[80px]"
+        />
+        <button
+          onClick={() => takeTicket()}
+          disabled={!slug || loading}
+          className="bg-black text-white rounded-xl py-3 disabled:opacity-50"
+        >
+          {loading ? 'Attendi…' : 'Prendi numero'}
+        </button>
       </div>
+
+      {ticket && (
+        <div className="space-y-2">
+          <div className="text-lg">
+            Il tuo numero: <b>{ticket}</b>
+          </div>
+          <div>
+            Chiamato: <b>{lastCalled ?? '-'}</b>
+          </div>
+          <div>
+            Persone davanti:{' '}
+            <b>
+              {waitingAhead ??
+                Math.max(
+                  0,
+                  (state?.last_issued_number ?? 0) -
+                    (state?.last_called_number ?? 0) -
+                    1,
+                )}
+            </b>
+          </div>
+        </div>
+      )}
+
+      {nextSoon && (
+        <div className="p-3 rounded-xl bg-yellow-100 border border-yellow-300">
+          Il tuo turno è il prossimo.
+        </div>
+      )}
+      {itsYou && (
+        <div className="p-3 rounded-xl bg-green-100 border border-green-300">
+          È il tuo turno.
+        </div>
+      )}
+
+      <audio ref={audioRef} src="/notification.mp3" preload="auto" />
     </div>
   );
 }
