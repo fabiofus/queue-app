@@ -258,7 +258,8 @@ function ClerkContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             counterSlug: slug,
-            firmSecondWithin10m: true, // il clerk può sempre prendere un altro nume
+            firmSecondWithin10m: true, // il clerk può sempre prendere un altro numero
+            fromClerk: true, // <<< importantissimo: dice all'API di saltare il controllo active_ticket_exists
             // niente customer: il numero viene comunicato a voce
           }),
         });

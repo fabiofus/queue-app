@@ -12,6 +12,7 @@ type TicketBody = {
   counterSlug?: string;
   customer?: { full_name?: string | null; phone?: string | null };
   confirmSecondWithin10m?: boolean;
+  fromClerk?: boolean;
 };
 
 function nowIso() {
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as TicketBody | null;
     const counterSlug = (body?.counterSlug || "").trim();
     const confirmSecondWithin10m = !!body?.confirmSecondWithin10m;
+    const fromClerk = !!body?.fromClerk;
     const customer = body?.customer;
 
     if (!counterSlug) {
@@ -97,6 +99,7 @@ export async function POST(req: NextRequest) {
     const lastCalled = counter.last_called_number ?? 0;
 
     // 2) regole anti-abuso: 1 ticket attivo + cooldown (server-side)
+    //    NB: il clerk (fromClerk === true) bypassa questi controlli
     const { data: dev } = await supabaseAdmin
       .from("take_devices")
       .select("last_take_at, active_ticket_number")
@@ -104,12 +107,16 @@ export async function POST(req: NextRequest) {
       .eq("device_id", deviceId)
       .maybeSingle();
 
-    if (!confirmSecondWithin10m && dev?.active_ticket_number) {
+    if (!fromClerk && !confirmSecondWithin10m && dev?.active_ticket_number) {
       const active = dev.active_ticket_number;
       // se non è ancora stato chiamato, blocca
       if ((counter.last_called_number ?? 0) < active) {
         const res = NextResponse.json(
-          { error: "active_ticket_exists", ticket_number: active, message: `Hai già un numero attivo: ${active}.` },
+          {
+            error: "active_ticket_exists",
+            ticket_number: active,
+            message: `Hai già un numero attivo: ${active}.`,
+          },
           { status: 409 }
         );
         if (!existingDeviceId) {
@@ -126,7 +133,7 @@ export async function POST(req: NextRequest) {
       // altrimenti è “consumato”: lo consideriamo libero (non serve pulire subito)
     }
 
-    if (!confirmSecondWithin10m && dev?.last_take_at) {
+    if (!fromClerk && !confirmSecondWithin10m && dev?.last_take_at) {
       const diff = Date.now() - Date.parse(dev.last_take_at);
       if (diff < COOLDOWN_MS) {
         const remainingMs = COOLDOWN_MS - diff;
@@ -187,6 +194,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 5) aggiorna device state (cooldown + ticket attivo)
+    //    Anche il clerk finisce qui, ma i controlli sopra lo ignorano se fromClerk === true
     await supabaseAdmin.from("take_devices").upsert({
       counter_slug: counterSlug,
       device_id: deviceId,
