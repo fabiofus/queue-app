@@ -40,11 +40,9 @@ function ClerkContent() {
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // stato per bottone "numero manuale"
   const [manualCreating, setManualCreating] = useState(false);
   const [lastManualTicket, setLastManualTicket] = useState<number | null>(null);
 
-  // carica brand/copy per titolo
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
@@ -65,7 +63,6 @@ function ClerkContent() {
     };
   }, [slug]);
 
-  // verifica sessione clerk esistente
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
@@ -83,7 +80,6 @@ function ClerkContent() {
     };
   }, [slug]);
 
-  // stato iniziale contatore (pubblico)
   useEffect(() => {
     if (!slug) return;
     (async () => {
@@ -211,7 +207,7 @@ function ClerkContent() {
         setLastIssued(0);
         setWaitingAhead(0);
         setContact(null);
-        setLastManualTicket(null); // <-- resetta anche l'ultimo numero manuale
+        setLastManualTicket(null);
         alert('Contatore resettato ✅');
       } finally {
         setLoading(false);
@@ -252,7 +248,6 @@ function ClerkContent() {
     [slug, lastCalled, merchant],
   );
 
-  // crea ticket manuale per cliente senza app (bypassa i controlli cliente)
   const handleManualTicket = useCallback(
     async () => {
       if (!slug) return;
@@ -266,7 +261,6 @@ function ClerkContent() {
             counterSlug: slug,
             confirmSecondWithin10m: true,
             fromClerk: true,
-            // niente customer: il numero viene comunicato a voce
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -300,6 +294,11 @@ function ClerkContent() {
     ? `https://wa.me/${phoneDigits.replace(/^\+/, '')}`
     : null;
   const telLink = phoneDigits ? `tel:${phoneDigits}` : null;
+
+  const reportHref =
+    slug !== ''
+      ? `/api/clerk/contacts.csv?slug=${encodeURIComponent(slug)}`
+      : '#';
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
@@ -386,6 +385,16 @@ function ClerkContent() {
                 Reset contatore
               </button>
             </div>
+
+            {slug && (
+              <a
+                href={reportHref}
+                target="_blank"
+                className="border rounded-xl py-3 px-4 text-center text-sm mt-2"
+              >
+                Scarica report di oggi (CSV)
+              </a>
+            )}
           </div>
 
           <div className="border rounded-xl p-4">
