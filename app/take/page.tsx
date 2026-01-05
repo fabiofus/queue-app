@@ -115,7 +115,7 @@ function TakeContent() {
     if (ticket == null) return;
     if (lastCalled == null) return;
 
-    if (lastCalled > ticket) {
+    if (lastCalled >= ticket) {
       clearTicketNumber(slug);
       setTicket(null);
       setNotifiedTwoBefore(false);
