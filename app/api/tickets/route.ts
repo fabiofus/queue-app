@@ -212,7 +212,11 @@ export async function POST(req: NextRequest) {
     const waitingAhead = Math.max(0, ticketNumber - lastCalled - 1);
 
     const res = NextResponse.json(
-      { ticket_number: ticketNumber, waiting_ahead: waitingAhead },
+      { ticket_number: ticketNumber,
+        waiting_ahead: waitingAhead,
+        last_issued_number: ticketNumber,
+        last_called_number: lastCalled,
+       },
       { status: 201 }
     );
 
