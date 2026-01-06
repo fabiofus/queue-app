@@ -32,6 +32,7 @@ function ClerkContent() {
 
   const [authed, setAuthed] = useState(false);
   const [pin, setPin] = useState('');
+  const [queueMode, setQueueMode] = useState<'single' | 'tables'>('single');
 
   const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [lastIssued, setLastIssued] = useState<number | null>(null);
@@ -43,6 +44,7 @@ function ClerkContent() {
   const [manualCreating, setManualCreating] = useState(false);
   const [lastManualTicket, setLastManualTicket] = useState<number | null>(null);
 
+  // carica brand/copy per titolo
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
@@ -63,6 +65,7 @@ function ClerkContent() {
     };
   }, [slug]);
 
+  // verifica sessione clerk esistente
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
@@ -80,6 +83,30 @@ function ClerkContent() {
     };
   }, [slug]);
 
+  // leggo la modalità di coda (single / tables)
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+
+    fetch(`/api/clerk/config?slug=${encodeURIComponent(slug)}`, {
+      cache: 'no-store',
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d) return;
+        const mode = d.queue_mode === 'tables' ? 'tables' : 'single';
+        setQueueMode(mode);
+      })
+      .catch(err => {
+        console.error('clerk_config_error', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  // stato iniziale contatore (pubblico)
   useEffect(() => {
     if (!slug) return;
     (async () => {
@@ -307,6 +334,12 @@ function ClerkContent() {
         {subtitle && (
           <div className="text-sm text-gray-600">{subtitle}</div>
         )}
+        <div className="text-xs text-gray-500">
+          Modalità coda:{' '}
+          {queueMode === 'tables'
+            ? 'Gestione tavoli/posti'
+            : 'Coda semplice'}
+        </div>
       </div>
 
       {!slug && <div className="text-red-600">Slug mancante</div>}
@@ -384,17 +417,17 @@ function ClerkContent() {
               >
                 Reset contatore
               </button>
-            </div>
 
-            {slug && (
-              <a
-                href={reportHref}
-                target="_blank"
-                className="border rounded-xl py-3 px-4 text-center text-sm mt-2"
-              >
-                Scarica report di oggi (CSV)
-              </a>
-            )}
+              {slug && (
+                <a
+                  href={reportHref}
+                  target="_blank"
+                  className="border rounded-xl py-3 px-4 text-center text-sm mt-2"
+                >
+                  Scarica report di oggi (CSV)
+                </a>
+              )}
+            </div>
           </div>
 
           <div className="border rounded-xl p-4">

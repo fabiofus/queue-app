@@ -77,7 +77,7 @@ function TakeContent() {
 
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
-  const [seats, setSeats] = useState(''); // numero di posti (string, poi lo convertiamo)
+  const [seats, setSeats] = useState(''); // numero di posti (solo per modalità tavoli)
   const [notes, setNotes] = useState(''); // note/allergie ecc.
 
   const [ticket, setTicket] = useState<number | null>(null);
@@ -85,6 +85,8 @@ function TakeContent() {
   const [lastCalled, setLastCalled] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [notifiedTwoBefore, setNotifiedTwoBefore] = useState(false);
+
+  const [queueMode, setQueueMode] = useState<'single' | 'tables'>('single');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -102,6 +104,29 @@ function TakeContent() {
     }
   }, [slug]);
 
+  // leggo la modalità di coda (single / tables) dal backend
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+
+    fetch(`/api/clerk/config?slug=${encodeURIComponent(slug)}`, {
+      cache: 'no-store',
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled || !d) return;
+        const mode = d.queue_mode === 'tables' ? 'tables' : 'single';
+        setQueueMode(mode);
+      })
+      .catch(err => {
+        console.error('take_config_error', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
   // aggiorna lastCalled dallo stato SSE
   useEffect(() => {
     if (state) {
@@ -109,7 +134,7 @@ function TakeContent() {
     }
   }, [state]);
 
-  // se il bancone ha già superato il tuo numero, libera il ticket
+  // se il bancone ha già superato (o chiamato) il tuo numero, libera il ticket
   useEffect(() => {
     if (!slug) return;
     if (ticket == null) return;
@@ -166,11 +191,23 @@ function TakeContent() {
       }
     }
 
+    // se in futuro useremo la modalità tavoli, qui possiamo rendere i posti obbligatori
+    let seatsValue: number | null = null;
+    if (queueMode === 'tables') {
+      if (!seats.trim()) {
+        alert('Inserisci il numero di posti per prenotare un tavolo.');
+        return;
+      }
+      const parsed = Number(seats);
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        alert('Numero di posti non valido.');
+        return;
+      }
+      seatsValue = parsed;
+    }
+
     setLoading(true);
     try {
-      const seatsValue =
-        seats.trim() === '' ? null : Number.isNaN(Number(seats)) ? null : Number(seats);
-
       const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -232,6 +269,8 @@ function TakeContent() {
     }
   }
 
+  const showSeatsField = queueMode === 'tables';
+
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold">Prendi il tuo numero</h1>
@@ -250,16 +289,18 @@ function TakeContent() {
           onChange={e => setPhone(e.target.value)}
           className="border rounded-xl p-3"
         />
-        <input
-          type="number"
-          min={1}
-          placeholder="Numero di posti (facoltativo)"
-          value={seats}
-          onChange={e => setSeats(e.target.value)}
-          className="border rounded-xl p-3"
-        />
+        {showSeatsField && (
+          <input
+            type="number"
+            min={1}
+            placeholder="Numero di posti"
+            value={seats}
+            onChange={e => setSeats(e.target.value)}
+            className="border rounded-xl p-3"
+          />
+        )}
         <textarea
-          placeholder="Note (allergie, passeggino, disabile, sediolone, ecc.) (facoltativo)"
+          placeholder="Note (allergie, preferenze, ecc.) (facoltativo)"
           value={notes}
           onChange={e => setNotes(e.target.value)}
           className="border rounded-xl p-3 min-h-[80px]"
